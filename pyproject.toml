@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "oservice"
+version = "0.2.0"
+description = "3O service assembly layer — engine skeletons + assembler (5th pillar of helios-plat)"
+readme = "README.md"
+requires-python = ">=3.14"
+authors = [{name = "Wiki", email = "wiki@helios-plat"}]
+license = {text = "MIT"}
+keywords = ["3o", "service", "assembly", "engine", "helios-plat"]
+
+dependencies = [
+    # 3O 四包依赖 (oservice 在依赖链最上层)
+    "obase @ git+ssh://git@github.com/helios-plat/obase.git@v0.9.0",
+    "oprim @ git+ssh://git@github.com/helios-plat/oprim.git@v2.24.1",
+    "oskill @ git+ssh://git@github.com/helios-plat/oskill.git@v3.8.0",
+    "omodul @ git+ssh://git@github.com/helios-plat/omodul.git@v1.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+    "mypy>=1.8",
+    "ruff>=0.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["oservice"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+strict = true
+python_version = "3.14"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
