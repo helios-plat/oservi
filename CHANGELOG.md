@@ -5,6 +5,45 @@ All notable changes to oservice will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-05
+
+### Added (Aegis 3O Element IMPL SPEC v1.0 — B1)
+- `TriageEngine` (`skeleton="triage"`): LLM 分诊引擎 — 事件拉取 → filters 链过滤 → LLM 优先级评分 → 去重 → min_score 筛选 → on_triage_result 回调. 注入: llm_provider=obase(1) + filters=layer4(0..n). 双实证: Aegis C2 TriageEngine + Tide v5 SignalClassifier.
+- `AgenticLoopEngine` (`skeleton="agentic_loop"`): ReAct 自主代理循环引擎 — thought/action/observation 循环, 工具路由, max_steps 上限, 可选 RAG 上下文. 注入: llm_provider=obase(1) + tools=oprim(1..n) + knowledge_retrieval=oskill(0..1). 双实证: Aegis C2 AgenticLoop + Helios-Refactorer AutoAgent.
+- `ActionPlannerEngine` (`skeleton="action_planner"`): 行动计划引擎 — RAG 检索 → LLM 计划生成 → plugin_registry 路由执行 → 步骤重试 → on_plan_done 回调. 注入: llm_provider=obase(1) + plugin_registry=layer4(1) + rag=oskill(0..1). 双实证: Aegis C2 ActionPlanner + Tide v5 RemediationPlanner.
+- `AppInstallerEngine` (`skeleton="app_installer"`): App 安装流水线引擎 — catalog_fetch → compose_pull → compose_up → caddy_route_add → verify_health. 注入: catalog_fetch=oprim(1) + compose_up=oprim(1) + compose_pull=oprim(1) + caddy_route_add=oskill(1) + verify_health=oskill(1). 双实证: Aegis AppStation + Tide DevShop.
+- 55 新增测试 (4 × ≥10 tests), 全部绿.
+
+## [0.3.0] - 2026-06-04
+
+### Changed (BREAKING)
+- `ResearcherEngine.llm_caller` 注入点 kind 从 `"obase"` 改为 `"oprim"` (v1.0 §3.2 形态 3: 单 LLM = oprim)
+- `FeedTrackerEngine.subscription_query_omodul` 改名 `subscription_query`, kind 从 `"omodul"` 改 `"layer4"`
+- `FeedTrackerEngine.subscription_update_omodul` 改名 `subscription_update`, kind 同上
+
+### Added
+- `InjectionKind` 新增 `"layer4"` 选项: 项目服务层 callable (thin wrapper / 业务特定 CRUD / 非主库元素)
+  - 装配器对 layer4 注入跳过 __module__ 来源校验
+  - 适用: 引擎需要项目特定数据访问 (e.g. Stratum 订阅 DuckDB CRUD), 但不入主库
+
+### Fixed
+- ResearcherEngine v0.2.0 设计错误: 把 LLM caller kind 设成 obase (实际 LLM 调用本质是 oprim)
+- FeedTrackerEngine v0.2.0 设计错误: 订阅 CRUD 标 omodul kind (实际是项目服务层 thin wrapper)
+
+### Migration (Stratum / 其他 layer 4 项目)
+ResearcherEngine 装配:
+  inject={
+      "llm_caller": [oprim.llm_call],  # 不再用 ProviderRegistry.get
+      ...
+  }
+
+FeedTrackerEngine 装配:
+  inject={
+      "subscription_query": [stratum_thin_wrapper_query],  # layer4, 来自服务层
+      "subscription_update": [stratum_thin_wrapper_update],
+      ...
+  }
+
 ## [0.2.0] - 2026-06-04
 
 ### Added

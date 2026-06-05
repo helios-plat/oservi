@@ -14,7 +14,7 @@
 完整治理: docs/GOVERNANCE.md
 """
 
-__version__ = "0.2.0"
+__version__ = "0.4.0"
 
 from oservice.manifest import ServiceManifest, ManifestValidationError
 from oservice.assembler import assemble, validate_manifest
@@ -25,10 +25,15 @@ from oservice.engines._base import (
     get_skeleton,
     list_skeletons,
 )
+
 # 引擎 (触发注册到 registry)
 from oservice.engines.alerter import AlerterEngine
 from oservice.engines.researcher import ResearcherEngine
 from oservice.engines.feed_tracker import FeedTrackerEngine
+from oservice.engines.triage import TriageEngine
+from oservice.engines.agentic_loop import AgenticLoopEngine
+from oservice.engines.action_planner import ActionPlannerEngine
+from oservice.engines.app_installer import AppInstallerEngine
 
 __all__ = [
     "__version__",
@@ -48,4 +53,8 @@ __all__ = [
     "AlerterEngine",
     "ResearcherEngine",
     "FeedTrackerEngine",
+    "TriageEngine",
+    "AgenticLoopEngine",
+    "ActionPlannerEngine",
+    "AppInstallerEngine",
 ]
