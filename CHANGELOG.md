@@ -5,6 +5,23 @@ All notable changes to oservice will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-06-05
+
+### Added
+- `TriggerMode` 类型别名加 `"on_signal"`: 事件驱动触发语义 (区别于 `on_demand` 单次调用)
+- `TriageEngine.run()` 实现 `on_signal`/`on_demand` 非阻塞模式 (`_ready=True`, 立即返回)
+- `TriageEngine.process(signal)`: 事件驱动入口, caller 收信号后主动调用
+
+### Fixed
+- v0.4.0 TriageEngine `__init__` 只接受 `on_interval`/`on_cron`, 但 Owner SPEC 写
+  `trigger={"on_signal": True}`, 实际装配会 `ValueError`. 本 PATCH 补全 `on_signal`/`on_demand`.
+
+### Notes
+- `on_demand` vs `on_signal` 语义区分:
+  - `on_demand`: 单次调用 (`ResearcherEngine.research(query=...)`)
+  - `on_signal`: 事件流 (`TriageEngine.process(signal)` 被 dispatcher 反复调)
+- Aegis Brain signal dispatcher 调 `triage.process(signal)` 模式可正常运行
+
 ## [0.4.0] - 2026-06-05
 
 ### Added (Aegis 3O Element IMPL SPEC v1.0 — B1)

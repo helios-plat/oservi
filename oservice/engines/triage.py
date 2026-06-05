@@ -103,17 +103,25 @@ class TriageEngine(EngineSkeleton):
 
         # 运行期状态 (仅在实例存在 — 红线 4)
         self._running = False
+        self._ready = False
         self._iteration_count = 0
         self._last_error: str | None = None
         self._dedup_seen: dict[str, float] = {}  # entity_id → ts
 
-        if "on_interval" not in trigger and "on_cron" not in trigger:
-            raise ValueError("TriageEngine trigger must contain 'on_interval' or 'on_cron'")
+        _VALID_TRIGGERS = frozenset({"on_interval", "on_cron", "on_demand", "on_signal"})
+        if not (_VALID_TRIGGERS & trigger.keys()):
+            raise ValueError(
+                "TriageEngine trigger must contain 'on_signal', 'on_demand', 'on_interval', or 'on_cron'"
+            )
 
     # ===== 主循环 =====
 
     def run(self) -> None:
-        """启动持续运行循环 (阻塞)."""
+        """启动引擎. on_signal/on_demand 模式非阻塞; on_interval/on_cron 阻塞循环."""
+        if "on_signal" in self.trigger or "on_demand" in self.trigger:
+            self._ready = True
+            logger.info(f"TriageEngine '{self.name}' ready for on_signal dispatch")
+            return
         if self._running:
             raise RuntimeError(f"TriageEngine {self.name} already running")
         self._running = True
@@ -125,8 +133,19 @@ class TriageEngine(EngineSkeleton):
             logger.info(f"TriageEngine '{self.name}' stopped")
 
     def stop(self) -> None:
-        """优雅停止主循环."""
+        """优雅停止."""
         self._running = False
+        self._ready = False
+
+    async def process(self, signal: dict[str, Any]) -> dict[str, Any] | None:
+        """事件驱动入口 (on_signal 模式). Caller 收信号 → 调本方法."""
+        if not self._ready:
+            raise RuntimeError(f"TriageEngine '{self.name}' not started, call run() first")
+        filtered = self._apply_filters([signal])
+        if not filtered:
+            return None
+        scored = await self._score_events(filtered)
+        return scored[0] if scored else None
 
     async def _run_loop(self) -> None:
         interval = self.trigger.get("on_interval", 60)
@@ -226,11 +245,18 @@ class TriageEngine(EngineSkeleton):
         return [{"priority_score": 50, **e} for e in events]
 
     def health(self) -> dict[str, Any]:
+        if self._ready:
+            status = "ready"
+        elif self._running:
+            status = "healthy"
+        else:
+            status = "stopped"
         return {
-            "status": "healthy" if self._running else "stopped",
+            "status": status,
             "details": {
                 "name": self.name,
                 "running": self._running,
+                "ready": self._ready,
                 "iteration_count": self._iteration_count,
                 "filters_count": len(self.filters),
                 "last_error": self._last_error,

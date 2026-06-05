@@ -11,13 +11,15 @@ Manifest 是装配输入. assemble(manifest) 输出可 run 的 Service.
 """
 
 from dataclasses import dataclass, field
-from typing import Callable, Any
+from typing import Callable, Any, Literal
+
+TriggerMode = Literal["on_interval", "on_cron", "on_demand", "on_signal"]
 
 
 @dataclass
 class ServiceManifest:
     """声明式服务定义.
-    
+
     Args:
         name: 服务唯一标识 (e.g. "tide-realtime-alerter")
         skeleton: 引擎骨架名 (e.g. "alerter" / "collector" / "scheduler")
@@ -25,7 +27,7 @@ class ServiceManifest:
                 e.g. {"evaluators": [oprim.X, oprim.Y], "channels": [obase.notify.telegram_send]}
         trigger: 触发配置 (e.g. {"on_interval": 300} / {"on_cron": "0 3 * * *"})
         config: 业务实例参数 (e.g. {"thresholds": {"warn": 0.5}})
-    
+
     Example:
         >>> from oprim import detect_sector_collapse
         >>> from obase.notify import telegram_send
@@ -37,13 +39,13 @@ class ServiceManifest:
         ...     config={"thresholds": {"warn": 0.5}},
         ... )
     """
-    
+
     name: str
     skeleton: str
     inject: dict[str, list[Callable[..., Any]]]
     trigger: dict[str, Any]
     config: dict[str, Any] = field(default_factory=dict)
-    
+
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("ServiceManifest.name cannot be empty")

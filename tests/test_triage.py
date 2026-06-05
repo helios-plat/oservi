@@ -198,3 +198,66 @@ def test_triage_injection_points_declared():
     assert TriageEngine.injection_points["llm_provider"].kind == "obase"
     assert TriageEngine.injection_points["filters"].kind == "layer4"
     assert TriageEngine.injection_points["filters"].cardinality == "0..n"
+
+
+# ===== on_signal 触发模式测试 =====
+
+fake_signal = {"entity_id": "s1", "message": "test signal", "priority_score": 60}
+
+
+def test_triage_on_signal_trigger_accepted():
+    """on_signal 触发模式应被装配器接受."""
+    from oservice import assemble
+    from oservice.manifest import ServiceManifest
+
+    # assembler 校验 kind="obase" — 需把 __module__ 伪装成 obase.*
+    def _obase_fake_llm(*, config, **kw):
+        return []
+
+    _obase_fake_llm.__module__ = "obase.test_utils"
+
+    m = ServiceManifest(
+        name="t-signal",
+        skeleton="triage",
+        inject={"llm_provider": [_obase_fake_llm], "filters": []},
+        trigger={"on_signal": True},
+        config={},
+    )
+    engine = assemble(m)
+    assert isinstance(engine, TriageEngine)
+
+
+def test_triage_run_non_blocking():
+    """on_signal 模式 run() 应立即返回, _ready=True."""
+    engine = TriageEngine(
+        llm_provider=fake_llm_fetch,
+        trigger={"on_signal": True},
+        config={},
+        name="t-signal",
+    )
+    engine.run()
+    assert engine._ready is True
+
+
+@pytest.mark.asyncio
+async def test_triage_process_requires_run_first():
+    """process() 调用前必须 run(), 否则 RuntimeError."""
+    engine = TriageEngine(
+        llm_provider=fake_llm_fetch,
+        trigger={"on_signal": True},
+        config={},
+        name="t-signal",
+    )
+    with pytest.raises(RuntimeError, match="not started"):
+        await engine.process(fake_signal)
+
+
+def test_triage_no_valid_trigger_raises():
+    """缺有效 trigger key → raise, 错误信息含 on_signal."""
+    with pytest.raises(ValueError, match="on_signal"):
+        TriageEngine(
+            llm_provider=fake_llm_fetch,
+            trigger={},
+            config={},
+            name="bad",
+        )
