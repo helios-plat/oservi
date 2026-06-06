@@ -7,18 +7,18 @@
 共性 (固化为机制):
 - 持续运行循环 (interval / cron 触发)
 - 按 filters 链式过滤事件
-- LLM 调用评分/分类 (可选, 由注入 llm_provider 决定)
+- LLM 调用评分/分类 (可选, 由注入 llm_caller 决定)
 - 去重 (dedup_bucket_seconds 内 entity_id 不重复推送)
 - 优先级排序后输出 triage_result
 
 差异 (留 inject + config):
-- llm_provider: LLM 评分业务逻辑 → 注入 obase
+- llm_caller: LLM 评分业务逻辑 → 注入 oprim
 - filters: 过滤管道 → 注入 layer4 (项目特定过滤规则)
 
 红线对照:
 - 红线 1 (≥2 实证): Aegis C2 TriageEngine + Tide v5 SignalClassifier ✅
 - 红线 2 (机制/业务分离): 评分/过滤业务全靠注入, 骨架只做调度 + 去重
-- 红线 3 (注入契约): llm_provider=obase(1) / filters=layer4(0..n)
+- 红线 3 (注入契约): llm_caller=oprim(1) / filters=layer4(0..n)
 - 红线 4 (无状态骨架): 状态只在 TriageEngine 实例
 - 红线 5 (不反向依赖): 本文件不 import 3O 四包
 """
@@ -50,7 +50,7 @@ class TriageEngine(EngineSkeleton):
     - 优先级降序排列后通过 on_triage_result 回调输出
 
     业务 (注入填料):
-    - llm_provider: obase LLM callable, 接收 events list → 返回 scored events list
+    - llm_caller: oprim LLM callable, 接收 events list → 返回 scored events list
     - filters: layer4 callable 列表, 各接收 event → 返回 bool (True=保留)
 
     Example::
@@ -59,7 +59,7 @@ class TriageEngine(EngineSkeleton):
             name="aegis-c2-triage",
             skeleton="triage",
             inject={
-                "llm_provider": obase_llm_score,
+                "llm_caller": [oprim_llm_score],
                 "filters": [filter_low_confidence, filter_known_false_positive],
             },
             trigger={"on_interval": 60},
@@ -72,22 +72,22 @@ class TriageEngine(EngineSkeleton):
     """
 
     injection_points = {
-        "llm_provider": Injection(
-            kind="obase",
+        "llm_caller": Injection(
+            kind="oprim",
             cardinality="1",
-            description="LLM 评分器: 接收原始事件列表 → 返回带 priority_score 字段的事件列表",
+            description="LLM caller oprim: 接收原始事件列表 → 返回带 priority_score 字段的事件列表",
         ),
         "filters": Injection(
             kind="layer4",
             cardinality="0..n",
-            description="过滤器链: 各接收单个事件 dict → 返回 bool (True=保留)",
+            description="项目特定噪声过滤 callable: 各接收单个事件 dict → 返回 bool (True=保留)",
         ),
     }
 
     def __init__(
         self,
         *,
-        llm_provider: Callable[..., Any],
+        llm_caller: Callable[..., Any],
         filters: list[Callable[..., Any]] | None = None,
         trigger: dict[str, Any],
         config: dict[str, Any],
@@ -95,7 +95,7 @@ class TriageEngine(EngineSkeleton):
         on_triage_result: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> None:
         self.name = name
-        self.llm_provider = llm_provider
+        self.llm_caller = llm_caller
         self.filters = filters or []
         self.trigger = trigger
         self.config = config
@@ -162,7 +162,7 @@ class TriageEngine(EngineSkeleton):
         """单次迭代: 拉取 → 过滤 → LLM 评分 → 去重 → 输出."""
         max_events = self.config.get("max_events_per_cycle", 50)
 
-        # 1. 从 llm_provider 拉取原始事件列表
+        # 1. 从 llm_caller 拉取原始事件列表
         raw_events = await self._fetch_events(max_events)
         if not raw_events:
             return
@@ -204,9 +204,9 @@ class TriageEngine(EngineSkeleton):
                 logger.warning(f"on_triage_result callback failed: {e}")
 
     async def _fetch_events(self, max_events: int) -> list[dict[str, Any]]:
-        """调 llm_provider 拉取原始事件."""
+        """调 llm_caller 拉取原始事件."""
         try:
-            result = self.llm_provider(
+            result = self.llm_caller(
                 config=self.config.get("llm_config", {}),
                 max_events=max_events,
             )
@@ -214,7 +214,7 @@ class TriageEngine(EngineSkeleton):
                 result = await result
             return result if isinstance(result, list) else []
         except Exception as e:
-            logger.warning(f"TriageEngine llm_provider fetch failed: {e}")
+            logger.warning(f"TriageEngine llm_caller fetch failed: {e}")
             return []
 
     def _apply_filters(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -228,9 +228,9 @@ class TriageEngine(EngineSkeleton):
         return result
 
     async def _score_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """调 llm_provider 对事件打分 (priority_score 字段)."""
+        """调 llm_caller 对事件打分 (priority_score 字段)."""
         try:
-            result = self.llm_provider(
+            result = self.llm_caller(
                 config=self.config.get("llm_config", {}),
                 events=events,
                 mode="score",

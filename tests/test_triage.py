@@ -48,7 +48,7 @@ def test_triage_registered_as_skeleton():
 
 def test_triage_engine_instantiates():
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         trigger={"on_interval": 60},
         config={},
         name="test-triage",
@@ -60,7 +60,7 @@ def test_triage_engine_instantiates():
 def test_triage_requires_trigger_key():
     with pytest.raises(ValueError, match="trigger must contain"):
         TriageEngine(
-            llm_provider=fake_llm_fetch,
+            llm_caller=fake_llm_fetch,
             trigger={"no_valid_key": True},
             config={},
             name="bad",
@@ -69,7 +69,7 @@ def test_triage_requires_trigger_key():
 
 def test_triage_filters_default_empty():
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         trigger={"on_interval": 10},
         config={},
         name="t",
@@ -79,7 +79,7 @@ def test_triage_filters_default_empty():
 
 def test_triage_filters_assigned():
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         filters=[filter_keep_all, filter_high_only],
         trigger={"on_interval": 10},
         config={},
@@ -90,7 +90,7 @@ def test_triage_filters_assigned():
 
 def test_triage_health_stopped():
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         trigger={"on_interval": 10},
         config={},
         name="t",
@@ -102,7 +102,7 @@ def test_triage_health_stopped():
 
 def test_triage_apply_filters_keep_all():
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         filters=[filter_keep_all],
         trigger={"on_interval": 10},
         config={},
@@ -114,7 +114,7 @@ def test_triage_apply_filters_keep_all():
 
 def test_triage_apply_filters_drop_all():
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         filters=[filter_drop_all],
         trigger={"on_interval": 10},
         config={},
@@ -127,7 +127,7 @@ def test_triage_apply_filters_drop_all():
 def test_triage_iterate_once_calls_callback():
     results = []
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         trigger={"on_interval": 10},
         config={"dedup_bucket_seconds": 0},
         name="t",
@@ -140,7 +140,7 @@ def test_triage_iterate_once_calls_callback():
 def test_triage_dedup_suppresses_duplicate():
     results = []
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         trigger={"on_interval": 10},
         config={"dedup_bucket_seconds": 9999},
         name="t",
@@ -156,7 +156,7 @@ def test_triage_dedup_suppresses_duplicate():
 def test_triage_min_score_filter():
     results = []
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         trigger={"on_interval": 10},
         config={"min_score": 60, "dedup_bucket_seconds": 0},
         name="t",
@@ -170,7 +170,7 @@ def test_triage_min_score_filter():
 def test_triage_empty_provider_no_callback():
     results = []
     engine = TriageEngine(
-        llm_provider=fake_llm_empty,
+        llm_caller=fake_llm_empty,
         trigger={"on_interval": 10},
         config={},
         name="t",
@@ -182,7 +182,7 @@ def test_triage_empty_provider_no_callback():
 
 def test_triage_stop_sets_running_false():
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         trigger={"on_interval": 10},
         config={},
         name="t",
@@ -193,9 +193,11 @@ def test_triage_stop_sets_running_false():
 
 
 def test_triage_injection_points_declared():
-    assert "llm_provider" in TriageEngine.injection_points
+    assert TriageEngine.injection_points, "injection_points must not be empty"
+    assert "llm_caller" in TriageEngine.injection_points
     assert "filters" in TriageEngine.injection_points
-    assert TriageEngine.injection_points["llm_provider"].kind == "obase"
+    assert TriageEngine.injection_points["llm_caller"].kind == "oprim"
+    assert TriageEngine.injection_points["llm_caller"].cardinality == "1"
     assert TriageEngine.injection_points["filters"].kind == "layer4"
     assert TriageEngine.injection_points["filters"].cardinality == "0..n"
 
@@ -210,16 +212,16 @@ def test_triage_on_signal_trigger_accepted():
     from oservice import assemble
     from oservice.manifest import ServiceManifest
 
-    # assembler 校验 kind="obase" — 需把 __module__ 伪装成 obase.*
-    def _obase_fake_llm(*, config, **kw):
+    # assembler 校验 kind="oprim" — 需把 __module__ 伪装成 oprim.*
+    def _oprim_fake_llm(*, config, **kw):
         return []
 
-    _obase_fake_llm.__module__ = "obase.test_utils"
+    _oprim_fake_llm.__module__ = "oprim.test_utils"
 
     m = ServiceManifest(
         name="t-signal",
         skeleton="triage",
-        inject={"llm_provider": [_obase_fake_llm], "filters": []},
+        inject={"llm_caller": [_oprim_fake_llm], "filters": []},
         trigger={"on_signal": True},
         config={},
     )
@@ -230,7 +232,7 @@ def test_triage_on_signal_trigger_accepted():
 def test_triage_run_non_blocking():
     """on_signal 模式 run() 应立即返回, _ready=True."""
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         trigger={"on_signal": True},
         config={},
         name="t-signal",
@@ -243,7 +245,7 @@ def test_triage_run_non_blocking():
 async def test_triage_process_requires_run_first():
     """process() 调用前必须 run(), 否则 RuntimeError."""
     engine = TriageEngine(
-        llm_provider=fake_llm_fetch,
+        llm_caller=fake_llm_fetch,
         trigger={"on_signal": True},
         config={},
         name="t-signal",
@@ -252,11 +254,28 @@ async def test_triage_process_requires_run_first():
         await engine.process(fake_signal)
 
 
+def test_triage_assemble_validates_required_llm_caller():
+    """缺 llm_caller 注入 → ManifestValidationError (cardinality=1 未满足)."""
+    from oservice import assemble
+    from oservice.manifest import ServiceManifest
+    from oservice.manifest import ManifestValidationError
+
+    m = ServiceManifest(
+        name="t-no-llm",
+        skeleton="triage",
+        inject={"filters": []},  # llm_caller 缺失
+        trigger={"on_signal": True},
+        config={},
+    )
+    with pytest.raises(ManifestValidationError, match="llm_caller"):
+        assemble(m)
+
+
 def test_triage_no_valid_trigger_raises():
     """缺有效 trigger key → raise, 错误信息含 on_signal."""
     with pytest.raises(ValueError, match="on_signal"):
         TriageEngine(
-            llm_provider=fake_llm_fetch,
+            llm_caller=fake_llm_fetch,
             trigger={},
             config={},
             name="bad",

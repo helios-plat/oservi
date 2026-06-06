@@ -5,6 +5,18 @@ All notable changes to oservice will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-06-06
+
+### Fixed
+- `TriageEngine.injection_points["llm_provider"]` kind 错标 `"obase"`, 应为 `"oprim"` (LLM
+  调用本质是 oprim 基础操作, 参照 v0.3.0 ResearcherEngine.llm_caller 修正先例)
+- 注入点名从 `llm_provider` 改为 `llm_caller`, 与 ResearcherEngine 命名一致
+
+### Notes
+- Sweep 确认: AgenticLoopEngine / ActionPlannerEngine / AppInstallerEngine injection_points 均完整
+- 对外破坏性变化: 任何直接用 `inject={"llm_provider": ...}` 装配 TriageEngine 的调用须改为
+  `inject={"llm_caller": ...}`, 注入 callable 须来自 oprim 层
+
 ## [0.4.1] - 2026-06-05
 
 ### Added
