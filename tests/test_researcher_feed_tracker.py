@@ -30,7 +30,7 @@ fake_url_fetch.__module__ = "oprim.url_fetch_ssrf_safe"
 async def fake_llm_caller(*, messages, max_tokens=512):
     """模拟 LLM 返回 JSON array of terms."""
     return {"content": '["quantum computing", "quantum supremacy", "qubit"]'}
-fake_llm_caller.__module__ = "obase.providers.llm"
+fake_llm_caller.__module__ = "oprim.llm_call"  # v1.0 §3.2 单 LLM = oprim
 
 
 async def fake_ingest_omodul(*, content, source_url=None, tags=None, user_id=None, title=None):
@@ -80,12 +80,12 @@ async def fake_subscription_query(*, last_check_before=None, status=None):
             ],
         },
     }
-fake_subscription_query.__module__ = "omodul.query_subscriptions"
+fake_subscription_query.__module__ = "stratum.services.feed_subscriptions"
 
 
 async def fake_subscription_update(**kwargs):
     return {"status": "completed"}
-fake_subscription_update.__module__ = "omodul.update_subscription"
+fake_subscription_update.__module__ = "stratum.services.feed_subscriptions"
 
 
 # ===== Researcher 测试 =====
@@ -210,7 +210,7 @@ class TestResearcherWorkflow:
         """LLM 失败时降级用原 query 作搜索词."""
         async def bad_llm(*, messages, max_tokens=512):
             raise RuntimeError("LLM down")
-        bad_llm.__module__ = "obase.providers.llm"
+        bad_llm.__module__ = "oprim.llm_call"
         
         m = ServiceManifest(
             name="r-bad-llm",
@@ -260,8 +260,8 @@ class TestFeedTrackerRegistration:
             inject={
                 "fetch_feed_oprim": [fake_fetch_rss_feed],
                 "diff_oprim": [fake_diff_detector],
-                "subscription_query_omodul": [fake_subscription_query],
-                "subscription_update_omodul": [fake_subscription_update],
+                "subscription_query": [fake_subscription_query],
+                "subscription_update": [fake_subscription_update],
                 "ingest_omodul": [fake_ingest_omodul],
             },
             trigger={"on_interval": 3600},
@@ -277,8 +277,8 @@ class TestFeedTrackerRegistration:
             inject={
                 "fetch_feed_oprim": [fake_fetch_rss_feed],
                 "diff_oprim": [fake_diff_detector],
-                "subscription_query_omodul": [fake_subscription_query],
-                "subscription_update_omodul": [fake_subscription_update],
+                "subscription_query": [fake_subscription_query],
+                "subscription_update": [fake_subscription_update],
                 "ingest_omodul": [fake_ingest_omodul],
             },
             trigger={},  # 无 on_cron / on_interval
@@ -297,8 +297,8 @@ class TestFeedTrackerTick:
             inject={
                 "fetch_feed_oprim": [fake_fetch_rss_feed],
                 "diff_oprim": [fake_diff_detector],
-                "subscription_query_omodul": [fake_subscription_query],
-                "subscription_update_omodul": [fake_subscription_update],
+                "subscription_query": [fake_subscription_query],
+                "subscription_update": [fake_subscription_update],
                 "ingest_omodul": [fake_ingest_omodul],
             },
             trigger={"on_interval": 3600},
@@ -323,7 +323,7 @@ class TestFeedTrackerTick:
                 "id": "sub_1", "user_id": "u", "url": "x", "feed_type": "rss",
                 "etag": "304-etag", "previous_entry_ids": [],
             }]}}
-        query_with_etag.__module__ = "omodul.query_subscriptions"
+        query_with_etag.__module__ = "stratum.services.feed_subscriptions"
         
         m = ServiceManifest(
             name="ft-304",
@@ -331,8 +331,8 @@ class TestFeedTrackerTick:
             inject={
                 "fetch_feed_oprim": [fetch_304],
                 "diff_oprim": [fake_diff_detector],
-                "subscription_query_omodul": [query_with_etag],
-                "subscription_update_omodul": [fake_subscription_update],
+                "subscription_query": [query_with_etag],
+                "subscription_update": [fake_subscription_update],
                 "ingest_omodul": [fake_ingest_omodul],
             },
             trigger={"on_interval": 3600},
@@ -347,7 +347,7 @@ class TestFeedTrackerTick:
         """无订阅时直接返."""
         async def empty_query(**kwargs):
             return {"findings": {"subscriptions": []}}
-        empty_query.__module__ = "omodul.query_subscriptions"
+        empty_query.__module__ = "stratum.services.feed_subscriptions"
         
         m = ServiceManifest(
             name="ft-empty",
@@ -355,8 +355,8 @@ class TestFeedTrackerTick:
             inject={
                 "fetch_feed_oprim": [fake_fetch_rss_feed],
                 "diff_oprim": [fake_diff_detector],
-                "subscription_query_omodul": [empty_query],
-                "subscription_update_omodul": [fake_subscription_update],
+                "subscription_query": [empty_query],
+                "subscription_update": [fake_subscription_update],
                 "ingest_omodul": [fake_ingest_omodul],
             },
             trigger={"on_interval": 3600},
@@ -380,8 +380,8 @@ class TestFeedTrackerTick:
             inject={
                 "fetch_feed_oprim": [fetch_fails],
                 "diff_oprim": [fake_diff_detector],
-                "subscription_query_omodul": [fake_subscription_query],
-                "subscription_update_omodul": [fake_subscription_update],
+                "subscription_query": [fake_subscription_query],
+                "subscription_update": [fake_subscription_update],
                 "ingest_omodul": [fake_ingest_omodul],
             },
             trigger={"on_interval": 3600},
@@ -400,8 +400,8 @@ class TestFeedTrackerTick:
             inject={
                 "fetch_feed_oprim": [fake_fetch_rss_feed],
                 "diff_oprim": [fake_diff_detector],
-                "subscription_query_omodul": [fake_subscription_query],
-                "subscription_update_omodul": [fake_subscription_update],
+                "subscription_query": [fake_subscription_query],
+                "subscription_update": [fake_subscription_update],
                 "ingest_omodul": [fake_ingest_omodul],
             },
             trigger={"on_interval": 3600},

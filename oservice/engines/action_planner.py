@@ -73,7 +73,7 @@ class ActionPlannerEngine(EngineSkeleton):
 
     injection_points = {
         "llm_provider": Injection(
-            kind="obase",
+            kind="layer4",
             cardinality="1",
             description="计划生成 LLM: (symptom, context) → [{plugin_id, params, description}]",
         ),
@@ -83,7 +83,7 @@ class ActionPlannerEngine(EngineSkeleton):
             description="插件注册表: (plugin_id: str) → Callable | None",
         ),
         "rag": Injection(
-            kind="oskill",
+            kind="layer4",
             cardinality="0..1",
             description="RAG 检索: (query: str) → context str (可选)",
         ),
@@ -117,6 +117,10 @@ class ActionPlannerEngine(EngineSkeleton):
     def submit_request(self, request: dict[str, Any]) -> None:
         """提交一个计划请求 (外部调用)."""
         self._request_queue.put_nowait(request)
+
+    async def invoke(self, request: dict[str, Any]) -> dict[str, Any]:
+        """单次同步调用（不走队列，直接执行）."""
+        return await self._execute_plan(request)
 
     def run(self) -> None:
         """启动持续运行循环 (阻塞)."""

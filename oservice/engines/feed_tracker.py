@@ -17,9 +17,9 @@
 业务 (注入):
 - fetch_feed_oprim (oprim, 1..n): fetch_rss_feed / parse_atom_feed
 - diff_oprim (oprim, 1): feed_diff_detector
-- subscription_query_omodul (omodul, 1): 查订阅列表
-- subscription_update_omodul (omodul, 1): 更新订阅状态
-- ingest_omodul (omodul, 1): 落库
+- subscription_query (layer4, 1): 项目服务层订阅查询 (thin wrapper)
+- subscription_update (layer4, 1): 项目服务层订阅更新
+- ingest_omodul (omodul, 1): 主库 omodul 落库
 
 红线对照:
 - 红线 1 (≥2 实证): Stratum FeedTrackerAgent + 工业 RSS reader 模式
@@ -61,8 +61,8 @@ class FeedTrackerEngine(EngineSkeleton):
             inject={
                 "fetch_feed_oprim": [oprim.fetch_rss_feed, oprim.parse_atom_feed],
                 "diff_oprim": [oprim.feed_diff_detector],
-                "subscription_query_omodul": [omodul.query_active_subscriptions],
-                "subscription_update_omodul": [omodul.update_subscription_state],
+                "subscription_query": [omodul.query_active_subscriptions],
+                "subscription_update": [omodul.update_subscription_state],
                 "ingest_omodul": [omodul.process_inbox_substrate],
             },
             trigger={"on_cron": "0 * * * *"},  # 每小时
@@ -86,20 +86,20 @@ class FeedTrackerEngine(EngineSkeleton):
             cardinality="1",
             description="feed diff oprim (e.g. feed_diff_detector)",
         ),
-        "subscription_query_omodul": Injection(
-            kind="omodul",
+        "subscription_query": Injection(
+            kind="layer4",
             cardinality="1",
-            description="查询订阅列表 omodul",
+            description="项目服务层订阅查询 callable (thin wrapper, e.g. Stratum DuckDB)",
         ),
-        "subscription_update_omodul": Injection(
-            kind="omodul",
+        "subscription_update": Injection(
+            kind="layer4",
             cardinality="1",
-            description="更新订阅状态 omodul (etag / last_modified / last_check_at)",
+            description="项目服务层订阅更新 callable (etag/last_modified/last_check_at)",
         ),
         "ingest_omodul": Injection(
             kind="omodul",
             cardinality="1",
-            description="落库 omodul (新 entry → substrate)",
+            description="落库 omodul (主库元素, e.g. process_inbox_substrate)",
         ),
     }
     
@@ -108,8 +108,8 @@ class FeedTrackerEngine(EngineSkeleton):
         *,
         fetch_feed_oprim: list[Callable[..., Any]],
         diff_oprim: list[Callable[..., Any]],
-        subscription_query_omodul: list[Callable[..., Any]],
-        subscription_update_omodul: list[Callable[..., Any]],
+        subscription_query: list[Callable[..., Any]],
+        subscription_update: list[Callable[..., Any]],
         ingest_omodul: list[Callable[..., Any]],
         trigger: dict[str, Any],
         config: dict[str, Any],
@@ -118,8 +118,8 @@ class FeedTrackerEngine(EngineSkeleton):
         self.name = name
         self.fetch_feed_oprim = fetch_feed_oprim
         self.diff_oprim_fn = diff_oprim[0]
-        self.subscription_query_fn = subscription_query_omodul[0]
-        self.subscription_update_fn = subscription_update_omodul[0]
+        self.subscription_query_fn = subscription_query[0]
+        self.subscription_update_fn = subscription_update[0]
         self.ingest_omodul_fn = ingest_omodul[0]
         self.trigger = trigger
         self.config = config

@@ -16,8 +16,8 @@
 业务 (注入):
 - search_oprim (oprim, 1..n): SearxNG / Bing / Google CSE 等
 - fetch_oprim (oprim, 1): URL 抓取 (含 SSRF 防护)
-- llm_caller (obase, 1): LLM rewrite + summarize
-- ingest_omodul (omodul, 0..1): 落库 (无则不落, 只返回结果)
+- llm_caller (oprim, 1): LLM caller oprim (v1.0 §3.2 形态 3: 单 LLM = oprim)
+- ingest_omodul (omodul, 0..1): 主库 omodul 落库 (无则不落, 只返回结果)
 
 红线对照:
 - 红线 1 (≥2 实证): Stratum ResearcherAgent + 工业模式 (Perplexity / GPT Researcher 等同模式)
@@ -85,9 +85,9 @@ class ResearcherEngine(EngineSkeleton):
             description="URL 抓取 oprim (含 SSRF 防护, e.g. url_fetch_ssrf_safe)",
         ),
         "llm_caller": Injection(
-            kind="obase",
+            kind="oprim",
             cardinality="1",
-            description="LLM caller (rewrite query + summarize), 来自 ProviderRegistry",
+            description="LLM caller oprim (v1.0 §3.2 形态 3: 单 LLM = oprim, e.g. oprim.llm_call)",
         ),
         "ingest_omodul": Injection(
             kind="omodul",

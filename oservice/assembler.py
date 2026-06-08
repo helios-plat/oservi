@@ -36,19 +36,24 @@ def _detect_element_kind(callable_obj: Callable[..., Any]) -> str:
 def _validate_injection(
     point_name: str,
     point: Injection,
-    refs: list[Callable[..., Any]] | None,
+    refs: list[Callable[..., Any]] | Callable[..., Any] | None,
 ) -> None:
     """校验单个注入点是否符合 kind + cardinality 要求.
-    
+
     Raises:
         ManifestValidationError: 校验失败
     """
-    refs = refs or []
-    
+    if refs is None:
+        refs_list = []
+    elif isinstance(refs, list):
+        refs_list = refs
+    else:
+        refs_list = [refs]
+
     # cardinality 校验
-    count = len(refs)
+    count = len(refs_list)
     card = point.cardinality
-    
+
     if card == "1":
         if count != 1:
             raise ManifestValidationError(
@@ -65,9 +70,13 @@ def _validate_injection(
                 f"injection '{point_name}' requires cardinality=1..n, got {count}"
             )
     # "0..n" 无限制
-    
+
     # kind 类型校验 (每个 ref 的来源层必须匹配 point.kind)
-    for i, ref in enumerate(refs):
+    # 例外: kind="layer4" 表示项目服务层 callable, 装配器不做主库来源校验
+    if point.kind == "layer4":
+        return  # layer4 注入接受任意 callable, 不查 __module__ 前缀
+
+    for i, ref in enumerate(refs_list):
         actual_kind = _detect_element_kind(ref)
         if actual_kind != point.kind:
             raise ManifestValidationError(

@@ -23,8 +23,14 @@ Cardinality = Literal["1", "0..1", "1..n", "0..n"]
 """
 
 
-InjectionKind = Literal["oprim", "oskill", "omodul", "obase"]
-"""注入点接受的元素层级."""
+InjectionKind = Literal["oprim", "oskill", "omodul", "obase", "layer4"]
+"""注入点接受的元素层级.
+
+- oprim/oskill/omodul/obase: 主库 4 仓元素 (扁平命名, 跨业务复用)
+- layer4: 项目服务层 callable (thin wrapper / 业务特定 CRUD / 非主库元素)
+  适用场景: 引擎需要项目特定数据访问 (e.g. Stratum 订阅 CRUD DuckDB), 不入主库.
+  装配器对 layer4 注入不做主库来源校验 (callable 可来自任何模块).
+"""
 
 
 @dataclass(frozen=True)

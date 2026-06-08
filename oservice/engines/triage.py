@@ -73,7 +73,7 @@ class TriageEngine(EngineSkeleton):
 
     injection_points = {
         "llm_caller": Injection(
-            kind="oprim",
+            kind="layer4",
             cardinality="1",
             description="LLM caller oprim: 接收原始事件列表 → 返回带 priority_score 字段的事件列表",
         ),
@@ -83,6 +83,7 @@ class TriageEngine(EngineSkeleton):
             description="项目特定噪声过滤 callable: 各接收单个事件 dict → 返回 bool (True=保留)",
         ),
     }
+
 
     def __init__(
         self,

@@ -72,7 +72,7 @@ class AgenticLoopEngine(EngineSkeleton):
 
     injection_points = {
         "llm_provider": Injection(
-            kind="obase",
+            kind="layer4",
             cardinality="1",
             description="ReAct LLM: (task, context, history) → {thought, action, tool_name, tool_args, final_answer}",
         ),
@@ -82,7 +82,7 @@ class AgenticLoopEngine(EngineSkeleton):
             description="可用工具集: oprim callable 列表, 各工具须有 __name__ 属性",
         ),
         "knowledge_retrieval": Injection(
-            kind="oskill",
+            kind="layer4",
             cardinality="0..1",
             description="RAG 检索: (query: str) → context str (可选)",
         ),
@@ -116,6 +116,10 @@ class AgenticLoopEngine(EngineSkeleton):
     def submit_task(self, task: dict[str, Any]) -> None:
         """提交一个 agentic task (外部调用)."""
         self._task_queue.put_nowait(task)
+
+    async def invoke(self, task: dict[str, Any]) -> dict[str, Any]:
+        """单次同步调用（不走队列，直接执行，用于 request/response 场景）."""
+        return await self._execute_task(task)
 
     def run(self) -> None:
         """启动持续运行循环 (阻塞)."""
