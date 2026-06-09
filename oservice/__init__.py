@@ -14,7 +14,7 @@
 完整治理: docs/GOVERNANCE.md
 """
 
-__version__ = "0.4.0"
+__version__ = "0.4.3"
 
 from oservice.manifest import ServiceManifest, ManifestValidationError
 from oservice.assembler import assemble, validate_manifest
