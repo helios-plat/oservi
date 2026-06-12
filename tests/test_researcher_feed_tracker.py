@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock
-from oservice import (
+from oservi import (
     ServiceManifest,
     ManifestValidationError,
     ResearcherEngine,

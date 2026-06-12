@@ -3,7 +3,7 @@
 import asyncio
 import pytest
 from unittest.mock import MagicMock
-from oservice import (
+from oservi import (
     ServiceManifest,
     ManifestValidationError,
     AlerterEngine,

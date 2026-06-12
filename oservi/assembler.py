@@ -10,8 +10,8 @@ v0.1 朴素契约:
 """
 
 from typing import Callable, Any
-from oservice.manifest import ServiceManifest, ManifestValidationError
-from oservice.engines._base import (
+from oservi.manifest import ServiceManifest, ManifestValidationError
+from oservi.engines._base import (
     EngineSkeleton,
     Injection,
     get_skeleton,

@@ -31,7 +31,7 @@ import asyncio
 import logging
 from typing import Any, Callable
 
-from oservice.engines._base import (
+from oservi.engines._base import (
     EngineSkeleton,
     Injection,
     register_skeleton,

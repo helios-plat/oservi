@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from oservice import TriageEngine, list_skeletons
+from oservi import TriageEngine, list_skeletons
 
 
 # ===== Fake injectables =====
@@ -209,8 +209,8 @@ fake_signal = {"entity_id": "s1", "message": "test signal", "priority_score": 60
 
 def test_triage_on_signal_trigger_accepted():
     """on_signal 触发模式应被装配器接受."""
-    from oservice import assemble
-    from oservice.manifest import ServiceManifest
+    from oservi import assemble
+    from oservi.manifest import ServiceManifest
 
     # assembler 校验 kind="oprim" — 需把 __module__ 伪装成 oprim.*
     def _oprim_fake_llm(*, config, **kw):
@@ -256,9 +256,9 @@ async def test_triage_process_requires_run_first():
 
 def test_triage_assemble_validates_required_llm_caller():
     """缺 llm_caller 注入 → ManifestValidationError (cardinality=1 未满足)."""
-    from oservice import assemble
-    from oservice.manifest import ServiceManifest
-    from oservice.manifest import ManifestValidationError
+    from oservi import assemble
+    from oservi.manifest import ServiceManifest
+    from oservi.manifest import ManifestValidationError
 
     m = ServiceManifest(
         name="t-no-llm",

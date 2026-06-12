@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock
 
-from oservice import AgenticLoopEngine, list_skeletons
+from oservi import AgenticLoopEngine, list_skeletons
 
 
 # ===== Fake injectables =====

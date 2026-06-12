@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import pytest
 
-from oservice import ActionPlannerEngine, list_skeletons
+from oservi import ActionPlannerEngine, list_skeletons
 
 
 # ===== Fake injectables =====

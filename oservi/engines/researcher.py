@@ -31,7 +31,7 @@ import logging
 from typing import Callable, Any
 from urllib.parse import urlparse, urlunparse
 
-from oservice.engines._base import (
+from oservi.engines._base import (
     EngineSkeleton,
     Injection,
     register_skeleton,

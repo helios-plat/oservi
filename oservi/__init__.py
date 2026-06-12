@@ -9,16 +9,16 @@
   2. 机制/业务分离
   3. 注入点类型契约
   4. 无状态骨架定义
-  5. 不反向依赖 (3O 四包禁 import oservice)
+  5. 不反向依赖 (3O 四包禁 import oservi)
 
 完整治理: docs/GOVERNANCE.md
 """
 
 __version__ = "0.4.3"
 
-from oservice.manifest import ServiceManifest, ManifestValidationError
-from oservice.assembler import assemble, validate_manifest
-from oservice.engines._base import (
+from oservi.manifest import ServiceManifest, ManifestValidationError
+from oservi.assembler import assemble, validate_manifest
+from oservi.engines._base import (
     EngineSkeleton,
     Injection,
     register_skeleton,
@@ -27,13 +27,13 @@ from oservice.engines._base import (
 )
 
 # 引擎 (触发注册到 registry)
-from oservice.engines.alerter import AlerterEngine
-from oservice.engines.researcher import ResearcherEngine
-from oservice.engines.feed_tracker import FeedTrackerEngine
-from oservice.engines.triage import TriageEngine
-from oservice.engines.agentic_loop import AgenticLoopEngine
-from oservice.engines.action_planner import ActionPlannerEngine
-from oservice.engines.app_installer import AppInstallerEngine
+from oservi.engines.alerter import AlerterEngine
+from oservi.engines.researcher import ResearcherEngine
+from oservi.engines.feed_tracker import FeedTrackerEngine
+from oservi.engines.triage import TriageEngine
+from oservi.engines.agentic_loop import AgenticLoopEngine
+from oservi.engines.action_planner import ActionPlannerEngine
+from oservi.engines.app_installer import AppInstallerEngine
 
 __all__ = [
     "__version__",

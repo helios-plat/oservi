@@ -30,7 +30,7 @@ import time
 from datetime import datetime, UTC, time as dtime
 from typing import Callable, Any
 
-from oservice.engines._base import (
+from oservi.engines._base import (
     EngineSkeleton,
     Injection,
     register_skeleton,

@@ -14,7 +14,7 @@ Phase 1:
 引擎骨架准入 5 红线见 docs/GOVERNANCE.md
 """
 
-from oservice.engines._base import (
+from oservi.engines._base import (
     EngineSkeleton,
     Injection,
     register_skeleton,
@@ -23,13 +23,13 @@ from oservice.engines._base import (
 )
 
 # 引擎自动导入触发 register_skeleton
-from oservice.engines import alerter as _alerter  # noqa: F401
-from oservice.engines import researcher as _researcher  # noqa: F401
-from oservice.engines import feed_tracker as _feed_tracker  # noqa: F401
+from oservi.engines import alerter as _alerter  # noqa: F401
+from oservi.engines import researcher as _researcher  # noqa: F401
+from oservi.engines import feed_tracker as _feed_tracker  # noqa: F401
 
-from oservice.engines.alerter import AlerterEngine
-from oservice.engines.researcher import ResearcherEngine
-from oservice.engines.feed_tracker import FeedTrackerEngine
+from oservi.engines.alerter import AlerterEngine
+from oservi.engines.researcher import ResearcherEngine
+from oservi.engines.feed_tracker import FeedTrackerEngine
 
 __all__ = [
     "EngineSkeleton",

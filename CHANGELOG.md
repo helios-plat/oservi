@@ -1,9 +1,16 @@
 # Changelog
 
-All notable changes to oservice will be documented in this file.
+All notable changes to oservi will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.0] - 2026-06-13
+
+### Changed (BREAKING)
+- 包改名 `oservice` → `oservi`; 所有 `from oservice import` 须改为 `from oservi import`
+- GitHub repo 改名: `helios-plat/oservice` → `helios-plat/oservi`
+- Python 包目录 `oservice/` → `oservi/`
 
 ## [0.4.2] - 2026-06-06
 

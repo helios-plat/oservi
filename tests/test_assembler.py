@@ -1,7 +1,7 @@
 """基础测试: manifest + assembler 红线校验."""
 
 import pytest
-from oservice import (
+from oservi import (
     ServiceManifest,
     ManifestValidationError,
     EngineSkeleton,

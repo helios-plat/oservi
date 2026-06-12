@@ -33,7 +33,7 @@ import logging
 from datetime import datetime, UTC, timedelta
 from typing import Callable, Any
 
-from oservice.engines._base import (
+from oservi.engines._base import (
     EngineSkeleton,
     Injection,
     register_skeleton,

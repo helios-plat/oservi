@@ -5,7 +5,7 @@
 2. 机制/业务分离 (业务靠注入)
 3. 注入点类型契约 (kind + cardinality)
 4. 无状态骨架定义 (状态只在 Service 实例)
-5. 不反向依赖 (3O 四包禁 import oservice)
+5. 不反向依赖 (3O 四包禁 import oservi)
 """
 
 from dataclasses import dataclass
