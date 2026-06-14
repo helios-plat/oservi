@@ -7,17 +7,17 @@ name = "oservi"
 version = "1.1.0"
 description = "3O service assembly layer — engine skeletons + assembler (5th pillar of helios-plat)"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 authors = [{name = "Wiki", email = "wiki@helios-plat"}]
 license = {text = "MIT"}
 keywords = ["3o", "service", "assembly", "engine", "helios-plat"]
 
 dependencies = [
-    # 3O 四包依赖 (oservice 在依赖链最上层)
-    "obase @ git+ssh://git@github.com/helios-plat/obase.git@v0.9.0",
-    "oprim @ git+ssh://git@github.com/helios-plat/oprim.git@v2.24.1",
-    "oskill @ git+ssh://git@github.com/helios-plat/oskill.git@v3.8.0",
-    "omodul @ git+ssh://git@github.com/helios-plat/omodul.git@v1.15.0",
+    # 3O 四包依赖 — plain names; local editable installs take precedence
+    "obase",
+    "oprim",
+    "oskill",
+    "omodul",
 ]
 
 [project.optional-dependencies]
@@ -41,11 +41,11 @@ asyncio_mode = "auto"
 
 [tool.mypy]
 strict = true
-python_version = "3.14"
+python_version = "3.12"
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
+target-version = "py312"
 
 [dependency-groups]
 dev = [
