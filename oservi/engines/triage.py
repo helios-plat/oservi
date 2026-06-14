@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -71,18 +71,19 @@ class TriageEngine(EngineSkeleton):
         )
     """
 
-    injection_points = {
+    injection_points: ClassVar[dict] = {
         "llm_caller": Injection(
-            kind="layer4",
+            kind="oprim",
             cardinality="1",
-            description="LLM caller oprim: 接收原始事件列表 → 返回带 priority_score 字段的事件列表",
+            description="LLM call primitive",
         ),
         "filters": Injection(
             kind="layer4",
             cardinality="0..n",
-            description="项目特定噪声过滤 callable: 各接收单个事件 dict → 返回 bool (True=保留)",
+            description="Optional signal filters",
         ),
     }
+    trigger_mode: str = "on_signal"
 
 
     def __init__(
@@ -138,11 +139,18 @@ class TriageEngine(EngineSkeleton):
         self._running = False
         self._ready = False
 
-    async def process(self, signal: dict[str, Any]) -> dict[str, Any] | None:
-        """事件驱动入口 (on_signal 模式). Caller 收信号 → 调本方法."""
+    async def process(self, signal_data: dict[str, Any]) -> dict[str, Any] | None:
+        """事件驱动入口 (on_signal 模式). Caller 收信号 → 调本方法.
+
+        Args:
+            signal_data: Raw signal dict to triage.
+
+        Returns:
+            Scored event dict, or None if filtered out.
+        """
         if not self._ready:
             raise RuntimeError(f"TriageEngine '{self.name}' not started, call run() first")
-        filtered = self._apply_filters([signal])
+        filtered = self._apply_filters([signal_data])
         if not filtered:
             return None
         scored = await self._score_events(filtered)

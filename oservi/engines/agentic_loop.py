@@ -28,8 +28,9 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -70,39 +71,54 @@ class AgenticLoopEngine(EngineSkeleton):
         )
     """
 
-    injection_points = {
-        "llm_provider": Injection(
-            kind="layer4",
+    injection_points: ClassVar[dict] = {
+        "llm_caller": Injection(
+            kind="oprim",
             cardinality="1",
-            description="ReAct LLM: (task, context, history) → {thought, action, tool_name, tool_args, final_answer}",
+            description="LLM call primitive",
         ),
         "tools": Injection(
             kind="oprim",
             cardinality="1..n",
-            description="可用工具集: oprim callable 列表, 各工具须有 __name__ 属性",
+            description="Tool primitives",
         ),
-        "knowledge_retrieval": Injection(
+        "retrieval": Injection(
+            kind="oskill",
+            cardinality="0..1",
+            description="Optional retrieval skill",
+        ),
+        "turn_handler": Injection(
+            kind="omodul",
+            cardinality="1",
+            description="Process prompt omodul",
+        ),
+        "layer4_ui": Injection(
             kind="layer4",
             cardinality="0..1",
-            description="RAG 检索: (query: str) → context str (可选)",
+            description="Optional UI adapter",
         ),
     }
+    trigger_mode: str = "on_demand"
 
     def __init__(
         self,
         *,
-        llm_provider: Callable[..., Any],
+        llm_caller: Callable[..., Any],
         tools: list[Callable[..., Any]],
-        knowledge_retrieval: Callable[..., Any] | None = None,
+        turn_handler: Callable[..., Any],
+        retrieval: Callable[..., Any] | None = None,
+        layer4_ui: Callable[..., Any] | None = None,
         trigger: dict[str, Any],
         config: dict[str, Any],
         name: str,
         on_task_done: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.name = name
-        self.llm_provider = llm_provider
+        self.llm_caller = llm_caller
         self.tools = {getattr(t, "__name__", str(i)): t for i, t in enumerate(tools)}
-        self.knowledge_retrieval = knowledge_retrieval
+        self.turn_handler = turn_handler
+        self.retrieval = retrieval
+        self.layer4_ui = layer4_ui
         self.trigger = trigger
         self.config = config
         self.on_task_done = on_task_done
@@ -121,8 +137,64 @@ class AgenticLoopEngine(EngineSkeleton):
         """单次同步调用（不走队列，直接执行，用于 request/response 场景）."""
         return await self._execute_task(task)
 
+    async def run_turn(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[Callable[..., Any]] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Execute a single conversation turn.
+
+        Calls turn_handler to pre-process the prompt, then llm_caller for inference.
+
+        Returns:
+            {"status": "completed", "turn_result": ..., "cost_usd": float}
+        """
+        context = context or {}
+        cost_usd = 0.0
+
+        # 1. pre-process via turn_handler (omodul, check async)
+        try:
+            if inspect.iscoroutinefunction(self.turn_handler):
+                turn_result = await self.turn_handler(messages=messages, context=context)
+            else:
+                turn_result = self.turn_handler(messages=messages, context=context)
+        except Exception as e:
+            logger.warning(f"turn_handler failed: {e}")
+            turn_result = {"messages": messages}
+
+        # 2. call llm_caller
+        processed_messages = turn_result.get("messages", messages) if isinstance(turn_result, dict) else messages
+        available_tools = tools or list(self.tools.values())
+        try:
+            if inspect.iscoroutinefunction(self.llm_caller):
+                llm_out = await self.llm_caller(
+                    messages=processed_messages,
+                    tools=available_tools,
+                    config=self.config,
+                )
+            else:
+                llm_out = self.llm_caller(
+                    messages=processed_messages,
+                    tools=available_tools,
+                    config=self.config,
+                )
+            if asyncio.iscoroutine(llm_out):
+                llm_out = await llm_out
+            if isinstance(llm_out, dict):
+                cost_usd = float(llm_out.get("cost_usd", 0.0))
+        except Exception as e:
+            logger.warning(f"llm_caller failed: {e}")
+            llm_out = {"error": str(e)}
+
+        return {
+            "status": "completed",
+            "turn_result": llm_out,
+            "cost_usd": cost_usd,
+        }
+
     def run(self) -> None:
-        """启动持续运行循环 (阻塞)."""
+        """启动持续运行循环 (on_demand: 非阻塞入口, 此处做队列消费兜底)."""
         if self._running:
             raise RuntimeError(f"AgenticLoopEngine {self.name} already running")
         self._running = True
@@ -154,73 +226,11 @@ class AgenticLoopEngine(EngineSkeleton):
                 logger.exception(f"AgenticLoopEngine '{self.name}' task failed")
 
     async def _execute_task(self, task: dict[str, Any]) -> dict[str, Any]:
-        """执行单次 agentic task (ReAct 循环)."""
-        max_steps = self.config.get("max_steps", 20)
-        history: list[dict[str, Any]] = []
-        context = ""
-
-        # RAG 上下文注入 (可选)
-        if self.knowledge_retrieval:
-            try:
-                raw = self.knowledge_retrieval(query=task.get("goal", ""))
-                if asyncio.iscoroutine(raw):
-                    raw = await raw
-                context = str(raw) if raw else ""
-            except Exception as e:
-                logger.warning(f"knowledge_retrieval failed: {e}")
-
-        for step in range(max_steps):
-            # LLM 推理
-            llm_out = await self._call_llm(task, context, history)
-
-            if llm_out.get("final_answer"):
-                return {
-                    "status": "completed",
-                    "steps": step + 1,
-                    "final_answer": llm_out["final_answer"],
-                    "history": history,
-                    "task": task,
-                }
-
-            # 工具调用
-            tool_name = llm_out.get("tool_name", "")
-            tool_args = llm_out.get("tool_args", {})
-            observation = await self._call_tool(tool_name, tool_args)
-
-            history.append(
-                {
-                    "step": step,
-                    "thought": llm_out.get("thought", ""),
-                    "action": llm_out.get("action", ""),
-                    "tool_name": tool_name,
-                    "tool_args": tool_args,
-                    "observation": observation,
-                }
-            )
-
-        return {
-            "status": "max_steps_reached",
-            "steps": max_steps,
-            "final_answer": None,
-            "history": history,
-            "task": task,
-        }
-
-    async def _call_llm(
-        self,
-        task: dict[str, Any],
-        context: str,
-        history: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """调 llm_provider 推理."""
-        try:
-            result = self.llm_provider(task=task, context=context, history=history)
-            if asyncio.iscoroutine(result):
-                result = await result
-            return result if isinstance(result, dict) else {}
-        except Exception as e:
-            logger.warning(f"AgenticLoopEngine LLM call failed: {e}")
-            return {"final_answer": f"LLM error: {e}"}
+        """执行单次 agentic task (delegates to run_turn)."""
+        messages = [{"role": "user", "content": task.get("goal", "")}]
+        result = await self.run_turn(messages=messages, context=task)
+        self._completed_count += 1
+        return result
 
     async def _call_tool(self, tool_name: str, tool_args: dict[str, Any]) -> Any:
         """调用指定工具."""
@@ -244,7 +254,8 @@ class AgenticLoopEngine(EngineSkeleton):
                 "queue_size": self._task_queue.qsize(),
                 "completed_count": self._completed_count,
                 "tools_available": list(self.tools.keys()),
-                "has_knowledge_retrieval": self.knowledge_retrieval is not None,
+                "has_retrieval": self.retrieval is not None,
+                "has_layer4_ui": self.layer4_ui is not None,
                 "last_error": self._last_error,
             },
         }

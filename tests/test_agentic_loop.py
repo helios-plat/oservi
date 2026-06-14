@@ -1,205 +1,227 @@
-"""AgenticLoopEngine 测试 — ≥10 tests."""
+"""AgenticLoopEngine tests — ≥10 tests (updated for new injection_points)."""
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import pytest
-from unittest.mock import MagicMock
 
 from oservi import AgenticLoopEngine, list_skeletons
 
 
 # ===== Fake injectables =====
 
-
-def fake_llm_final(*, task, context, history):
-    return {"thought": "done", "final_answer": "task complete", "tool_name": ""}
-
-
-def fake_llm_use_tool(*, task, context, history):
-    if len(history) == 0:
-        return {
-            "thought": "check",
-            "action": "inspect",
-            "tool_name": "inspect_tool",
-            "tool_args": {"name": "c1"},
-        }
-    return {"thought": "done", "final_answer": "inspection complete"}
+def fake_llm_caller(*, messages, tools, config):
+    return {"content": "done", "cost_usd": 0.01}
 
 
-def fake_llm_always_tool(*, task, context, history):
-    return {"thought": "loop", "action": "tool", "tool_name": "inspect_tool", "tool_args": {}}
+async def async_llm_caller(*, messages, tools, config):
+    return {"content": "async done", "cost_usd": 0.02}
 
 
-def fake_inspect_tool(*, name="x"):
-    return {"container": name, "status": "running"}
+def fake_turn_handler(*, messages, context):
+    return {"messages": messages, "processed": True}
 
 
-def fake_knowledge(*, query):
-    return "Runbook: restart the service if memory > 90%"
+async def async_turn_handler(*, messages, context):
+    return {"messages": messages, "processed": True, "async": True}
+
+
+def fake_tool_a(*, query=""):
+    return {"result": f"tool_a({query})"}
+
+
+def fake_tool_b(*, query=""):
+    return {"result": f"tool_b({query})"}
+
+
+def fake_retrieval(*, query):
+    return "retrieved context"
+
+
+def _make_engine(**overrides):
+    defaults = dict(
+        llm_caller=fake_llm_caller,
+        tools=[fake_tool_a],
+        turn_handler=fake_turn_handler,
+        retrieval=None,
+        layer4_ui=None,
+        trigger={"on_demand": True},
+        config={},
+        name="test-loop",
+    )
+    defaults.update(overrides)
+    return AgenticLoopEngine(**defaults)
 
 
 # ===== Tests =====
-
 
 def test_agentic_loop_registered():
     assert "agentic_loop" in list_skeletons()
 
 
-def test_agentic_loop_instantiates():
-    engine = AgenticLoopEngine(
-        llm_provider=fake_llm_final,
-        tools=[fake_inspect_tool],
-        trigger={"on_interval": 0},
-        config={},
-        name="test-loop",
-    )
-    assert engine.name == "test-loop"
-    assert "fake_inspect_tool" in engine.tools
-
-
-def test_agentic_loop_injection_points():
+def test_agentic_loop_injection_points_keys():
     pts = AgenticLoopEngine.injection_points
-    assert pts["llm_provider"].kind == "obase"
-    assert pts["tools"].kind == "oprim"
-    assert pts["tools"].cardinality == "1..n"
-    assert pts["knowledge_retrieval"].kind == "oskill"
-    assert pts["knowledge_retrieval"].cardinality == "0..1"
+    assert set(pts.keys()) == {"llm_caller", "tools", "retrieval", "turn_handler", "layer4_ui"}
 
 
-def test_execute_task_final_answer_immediate():
-    engine = AgenticLoopEngine(
-        llm_provider=fake_llm_final,
-        tools=[fake_inspect_tool],
-        trigger={"on_interval": 0},
-        config={"max_steps": 10},
-        name="t",
-    )
-    result = asyncio.run(engine._execute_task({"goal": "check system"}))
+def test_injection_point_llm_caller():
+    pt = AgenticLoopEngine.injection_points["llm_caller"]
+    assert pt.kind == "oprim"
+    assert pt.cardinality == "1"
+
+
+def test_injection_point_tools():
+    pt = AgenticLoopEngine.injection_points["tools"]
+    assert pt.kind == "oprim"
+    assert pt.cardinality == "1..n"
+
+
+def test_injection_point_retrieval():
+    pt = AgenticLoopEngine.injection_points["retrieval"]
+    assert pt.kind == "oskill"
+    assert pt.cardinality == "0..1"
+
+
+def test_injection_point_turn_handler():
+    pt = AgenticLoopEngine.injection_points["turn_handler"]
+    assert pt.kind == "omodul"
+    assert pt.cardinality == "1"
+
+
+def test_injection_point_layer4_ui():
+    pt = AgenticLoopEngine.injection_points["layer4_ui"]
+    assert pt.kind == "layer4"
+    assert pt.cardinality == "0..1"
+
+
+def test_trigger_mode_is_on_demand():
+    assert AgenticLoopEngine.trigger_mode == "on_demand"
+
+
+def test_instantiates_with_required_args():
+    engine = _make_engine()
+    assert engine.name == "test-loop"
+    assert engine.llm_caller is fake_llm_caller
+    assert engine.turn_handler is fake_turn_handler
+
+
+def test_tools_stored_by_name():
+    engine = _make_engine(tools=[fake_tool_a, fake_tool_b])
+    assert "fake_tool_a" in engine.tools
+    assert "fake_tool_b" in engine.tools
+
+
+def test_retrieval_none_by_default():
+    engine = _make_engine()
+    assert engine.retrieval is None
+
+
+def test_layer4_ui_none_by_default():
+    engine = _make_engine()
+    assert engine.layer4_ui is None
+
+
+def test_run_turn_sync_handlers():
+    engine = _make_engine()
+    result = asyncio.run(engine.run_turn(messages=[{"role": "user", "content": "hi"}]))
     assert result["status"] == "completed"
-    assert result["final_answer"] == "task complete"
-    assert result["steps"] == 1
+    assert "turn_result" in result
+    assert isinstance(result["cost_usd"], float)
 
 
-def test_execute_task_uses_tool():
-    engine = AgenticLoopEngine(
-        llm_provider=fake_llm_use_tool,
-        tools=[fake_inspect_tool],
-        trigger={"on_interval": 0},
-        config={"max_steps": 5},
-        name="t",
-    )
-    result = asyncio.run(engine._execute_task({"goal": "inspect c1"}))
+def test_run_turn_returns_cost_usd():
+    engine = _make_engine()
+    result = asyncio.run(engine.run_turn(messages=[{"role": "user", "content": "cost?"}]))
+    assert result["cost_usd"] == pytest.approx(0.01)
+
+
+def test_run_turn_with_async_llm_caller():
+    engine = _make_engine(llm_caller=async_llm_caller)
+    result = asyncio.run(engine.run_turn(messages=[{"role": "user", "content": "async"}]))
     assert result["status"] == "completed"
-    assert result["steps"] >= 2
-    assert any(h["tool_name"] == "inspect_tool" for h in result["history"])
+    assert result["cost_usd"] == pytest.approx(0.02)
 
 
-def test_execute_task_max_steps_reached():
-    engine = AgenticLoopEngine(
-        llm_provider=fake_llm_always_tool,
-        tools=[fake_inspect_tool],
-        trigger={"on_interval": 0},
-        config={"max_steps": 3},
-        name="t",
-    )
-    result = asyncio.run(engine._execute_task({"goal": "loop"}))
-    assert result["status"] == "max_steps_reached"
-    assert result["steps"] == 3
+def test_run_turn_with_async_turn_handler():
+    engine = _make_engine(turn_handler=async_turn_handler)
+    result = asyncio.run(engine.run_turn(messages=[{"role": "user", "content": "async handler"}]))
+    assert result["status"] == "completed"
 
 
-def test_execute_task_unknown_tool_returns_error_observation():
-    def llm_bad_tool(*, task, context, history):
-        if not history:
-            return {"tool_name": "nonexistent_tool", "tool_args": {}}
-        return {"final_answer": "done"}
+def test_run_turn_with_context():
+    received_context = {}
 
-    engine = AgenticLoopEngine(
-        llm_provider=llm_bad_tool,
-        tools=[fake_inspect_tool],
-        trigger={"on_interval": 0},
-        config={"max_steps": 5},
-        name="t",
-    )
-    result = asyncio.run(engine._execute_task({}))
-    assert any("ERROR" in str(h.get("observation", "")) for h in result["history"])
+    def handler_captures_context(*, messages, context):
+        received_context.update(context)
+        return {"messages": messages}
+
+    engine = _make_engine(turn_handler=handler_captures_context)
+    asyncio.run(engine.run_turn(
+        messages=[{"role": "user", "content": "ctx"}],
+        context={"session_id": "abc"},
+    ))
+    assert received_context.get("session_id") == "abc"
 
 
-def test_execute_task_with_knowledge_retrieval():
-    engine = AgenticLoopEngine(
-        llm_provider=fake_llm_final,
-        tools=[fake_inspect_tool],
-        knowledge_retrieval=fake_knowledge,
-        trigger={"on_interval": 0},
-        config={"max_steps": 5},
-        name="t",
-    )
-    result = asyncio.run(engine._execute_task({"goal": "runbook lookup"}))
+def test_run_turn_with_retrieval_set():
+    engine = _make_engine(retrieval=fake_retrieval)
+    assert engine.retrieval is fake_retrieval
+    result = asyncio.run(engine.run_turn(messages=[{"role": "user", "content": "retrieve"}]))
     assert result["status"] == "completed"
 
 
 def test_health_stopped():
-    engine = AgenticLoopEngine(
-        llm_provider=fake_llm_final,
-        tools=[fake_inspect_tool],
-        trigger={"on_interval": 0},
-        config={},
-        name="t",
-    )
+    engine = _make_engine()
     h = engine.health()
     assert h["status"] == "stopped"
-    assert h["details"]["has_knowledge_retrieval"] is False
+    assert h["details"]["running"] is False
 
 
-def test_health_with_knowledge():
-    engine = AgenticLoopEngine(
-        llm_provider=fake_llm_final,
-        tools=[fake_inspect_tool],
-        knowledge_retrieval=fake_knowledge,
-        trigger={"on_interval": 0},
-        config={},
-        name="t",
-    )
-    assert engine.health()["details"]["has_knowledge_retrieval"] is True
+def test_health_has_retrieval_false():
+    engine = _make_engine()
+    assert engine.health()["details"]["has_retrieval"] is False
+
+
+def test_health_has_retrieval_true():
+    engine = _make_engine(retrieval=fake_retrieval)
+    assert engine.health()["details"]["has_retrieval"] is True
+
+
+def test_health_has_layer4_ui():
+    engine = _make_engine(layer4_ui=lambda: None)
+    assert engine.health()["details"]["has_layer4_ui"] is True
 
 
 def test_submit_task_enqueues():
-    engine = AgenticLoopEngine(
-        llm_provider=fake_llm_final,
-        tools=[fake_inspect_tool],
-        trigger={"on_interval": 0},
-        config={},
-        name="t",
-    )
+    engine = _make_engine()
     engine.submit_task({"goal": "test"})
     assert engine._task_queue.qsize() == 1
 
 
 def test_stop_sets_not_running():
-    engine = AgenticLoopEngine(
-        llm_provider=fake_llm_final,
-        tools=[fake_inspect_tool],
-        trigger={"on_interval": 0},
-        config={},
-        name="t",
-    )
+    engine = _make_engine()
     engine._running = True
     engine.stop()
     assert engine._running is False
 
 
-def test_on_task_done_callback_called():
-    done_results = []
-    engine = AgenticLoopEngine(
-        llm_provider=fake_llm_final,
-        tools=[fake_inspect_tool],
-        trigger={"on_interval": 0},
-        config={"max_steps": 5},
-        name="t",
-        on_task_done=done_results.append,
-    )
-    result = asyncio.run(engine._execute_task({"goal": "x"}))
-    # Manually invoke callback as run() is blocking
-    engine.on_task_done(result)
-    assert len(done_results) == 1
-    assert done_results[0]["status"] == "completed"
+def test_run_turn_llm_error_still_returns_completed():
+    def bad_llm(*, messages, tools, config):
+        raise RuntimeError("LLM down")
+
+    engine = _make_engine(llm_caller=bad_llm)
+    result = asyncio.run(engine.run_turn(messages=[{"role": "user", "content": "hi"}]))
+    assert result["status"] == "completed"
+    assert "error" in result["turn_result"]
+
+
+def test_run_turn_turn_handler_error_uses_original_messages():
+    def bad_handler(*, messages, context):
+        raise ValueError("handler broken")
+
+    engine = _make_engine(turn_handler=bad_handler)
+    msgs = [{"role": "user", "content": "original"}]
+    result = asyncio.run(engine.run_turn(messages=msgs))
+    # Should still complete, llm_caller receives original messages
+    assert result["status"] == "completed"

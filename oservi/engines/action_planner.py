@@ -73,7 +73,7 @@ class ActionPlannerEngine(EngineSkeleton):
 
     injection_points = {
         "llm_provider": Injection(
-            kind="layer4",
+            kind="obase",
             cardinality="1",
             description="计划生成 LLM: (symptom, context) → [{plugin_id, params, description}]",
         ),
@@ -83,7 +83,7 @@ class ActionPlannerEngine(EngineSkeleton):
             description="插件注册表: (plugin_id: str) → Callable | None",
         ),
         "rag": Injection(
-            kind="layer4",
+            kind="oskill",
             cardinality="0..1",
             description="RAG 检索: (query: str) → context str (可选)",
         ),

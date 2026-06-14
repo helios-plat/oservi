@@ -249,165 +249,133 @@ class TestResearcherWorkflow:
 
 # ===== FeedTracker 测试 =====
 
+def _make_ft_manifest(name: str, fetch_fn=None, sub_fn=None, ingest_fn=None) -> ServiceManifest:
+    """Helper: build FeedTracker manifest with new 3-injection-point API."""
+    fetch_fn = fetch_fn or fake_fetch_event
+    sub_fn = sub_fn or fake_subscription_store
+    inject: dict = {
+        "fetch_event": [fetch_fn],
+        "subscription": [sub_fn],
+    }
+    if ingest_fn is not None:
+        inject["ingest"] = [ingest_fn]
+    return ServiceManifest(
+        name=name,
+        skeleton="feed_tracker",
+        inject=inject,
+        trigger={"on_interval": 5},
+        config={},
+    )
+
+
+async def fake_fetch_event(*, config=None):
+    return [
+        {"id": "e1", "title": "Entry 1", "url": "https://feed.example.com/e1"},
+        {"id": "e2", "title": "Entry 2", "url": "https://feed.example.com/e2"},
+    ]
+fake_fetch_event.__module__ = "oprim.fetch_event"
+
+
+async def fake_subscription_store(*, event=None):
+    return {"status": "ok"}
+fake_subscription_store.__module__ = "stratum.services.feed_subscriptions"
+
+
 class TestFeedTrackerRegistration:
     def test_feed_tracker_registered(self):
         assert "feed_tracker" in list_skeletons()
-    
+
     def test_feed_tracker_assemble_basic(self):
-        m = ServiceManifest(
-            name="ft-1",
-            skeleton="feed_tracker",
-            inject={
-                "fetch_feed_oprim": [fake_fetch_rss_feed],
-                "diff_oprim": [fake_diff_detector],
-                "subscription_query": [fake_subscription_query],
-                "subscription_update": [fake_subscription_update],
-                "ingest_omodul": [fake_ingest_omodul],
-            },
-            trigger={"on_interval": 3600},
-            config={},
-        )
-        service = assemble(m)
+        service = assemble(_make_ft_manifest("ft-1"))
         assert isinstance(service, FeedTrackerEngine)
-    
-    def test_feed_tracker_no_trigger_raises(self):
+
+    def test_feed_tracker_missing_required_injection_raises(self):
         m = ServiceManifest(
             name="bad",
             skeleton="feed_tracker",
             inject={
-                "fetch_feed_oprim": [fake_fetch_rss_feed],
-                "diff_oprim": [fake_diff_detector],
-                "subscription_query": [fake_subscription_query],
-                "subscription_update": [fake_subscription_update],
-                "ingest_omodul": [fake_ingest_omodul],
+                # subscription (required, cardinality=1) missing → ManifestValidationError
+                "fetch_event": [fake_fetch_event],
             },
-            trigger={},  # 无 on_cron / on_interval
+            trigger={"on_interval": 5},
             config={},
         )
-        with pytest.raises(ValueError, match="on_cron"):
+        with pytest.raises(ManifestValidationError):
             assemble(m)
 
 
 class TestFeedTrackerTick:
     @pytest.mark.asyncio
-    async def test_tick_processes_new_entries(self):
-        m = ServiceManifest(
-            name="ft-tick",
-            skeleton="feed_tracker",
-            inject={
-                "fetch_feed_oprim": [fake_fetch_rss_feed],
-                "diff_oprim": [fake_diff_detector],
-                "subscription_query": [fake_subscription_query],
-                "subscription_update": [fake_subscription_update],
-                "ingest_omodul": [fake_ingest_omodul],
-            },
-            trigger={"on_interval": 3600},
-            config={},
-        )
-        engine = assemble(m)
+    async def test_tick_returns_dict(self):
+        engine = assemble(_make_ft_manifest("ft-tick"))
         result = await engine.tick()
-        # 1 订阅, e1+e2 新增 → 2 落库
-        assert result["feeds_checked"] == 1
-        assert result["new_entries"] == 2
-    
-    @pytest.mark.asyncio
-    async def test_tick_handles_304(self):
-        """304 应跳过, 不调 diff/ingest."""
-        async def fetch_304(*, url, etag=None, last_modified=None):
-            return {"status": 304}
-        fetch_304.__module__ = "oprim.fetch_rss_feed"
-        
-        # 订阅含 etag → fetch 返 304
-        async def query_with_etag(**kwargs):
-            return {"findings": {"subscriptions": [{
-                "id": "sub_1", "user_id": "u", "url": "x", "feed_type": "rss",
-                "etag": "304-etag", "previous_entry_ids": [],
-            }]}}
-        query_with_etag.__module__ = "stratum.services.feed_subscriptions"
-        
-        m = ServiceManifest(
-            name="ft-304",
-            skeleton="feed_tracker",
-            inject={
-                "fetch_feed_oprim": [fetch_304],
-                "diff_oprim": [fake_diff_detector],
-                "subscription_query": [query_with_etag],
-                "subscription_update": [fake_subscription_update],
-                "ingest_omodul": [fake_ingest_omodul],
-            },
-            trigger={"on_interval": 3600},
-            config={},
-        )
-        engine = assemble(m)
-        result = await engine.tick()
-        assert result["new_entries"] == 0
-    
-    @pytest.mark.asyncio
-    async def test_tick_empty_subscriptions(self):
-        """无订阅时直接返."""
-        async def empty_query(**kwargs):
-            return {"findings": {"subscriptions": []}}
-        empty_query.__module__ = "stratum.services.feed_subscriptions"
-        
-        m = ServiceManifest(
-            name="ft-empty",
-            skeleton="feed_tracker",
-            inject={
-                "fetch_feed_oprim": [fake_fetch_rss_feed],
-                "diff_oprim": [fake_diff_detector],
-                "subscription_query": [empty_query],
-                "subscription_update": [fake_subscription_update],
-                "ingest_omodul": [fake_ingest_omodul],
-            },
-            trigger={"on_interval": 3600},
-            config={},
-        )
-        engine = assemble(m)
-        result = await engine.tick()
-        assert result["feeds_checked"] == 0
-        assert result["new_entries"] == 0
-    
-    @pytest.mark.asyncio
-    async def test_tick_isolation_on_fetch_error(self):
-        """单个订阅 fetch 失败不阻塞 tick 整体."""
-        async def fetch_fails(*, url, etag=None, last_modified=None):
-            raise RuntimeError("fetch error")
-        fetch_fails.__module__ = "oprim.fetch_rss_feed"
-        
-        m = ServiceManifest(
-            name="ft-err",
-            skeleton="feed_tracker",
-            inject={
-                "fetch_feed_oprim": [fetch_fails],
-                "diff_oprim": [fake_diff_detector],
-                "subscription_query": [fake_subscription_query],
-                "subscription_update": [fake_subscription_update],
-                "ingest_omodul": [fake_ingest_omodul],
-            },
-            trigger={"on_interval": 3600},
-            config={},
-        )
-        engine = assemble(m)
-        result = await engine.tick()
-        # 不 raise, fetch_failed sub 返 new_entries=0 (但 feeds_checked 仍计)
-        # 这里测的是 process_subscription 内捕获 fetch 错, 不影响整体
         assert isinstance(result, dict)
-    
+
+    @pytest.mark.asyncio
+    async def test_tick_events_fetched(self):
+        engine = assemble(_make_ft_manifest("ft-count"))
+        result = await engine.tick()
+        assert result["events_fetched"] == 2
+
+    @pytest.mark.asyncio
+    async def test_tick_events_processed(self):
+        engine = assemble(_make_ft_manifest("ft-proc"))
+        result = await engine.tick()
+        assert result["events_processed"] == 2
+
+    @pytest.mark.asyncio
+    async def test_tick_empty_events(self):
+        """fetch_event returns empty list → 0 processed."""
+        async def empty_fetch(*, config=None):
+            return []
+        empty_fetch.__module__ = "oprim.fetch_event"
+        engine = assemble(_make_ft_manifest("ft-empty", fetch_fn=empty_fetch))
+        result = await engine.tick()
+        assert result["events_fetched"] == 0
+        assert result["events_processed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_tick_fetch_error_does_not_raise(self):
+        """fetch_event error → tick returns dict (no raise)."""
+        async def bad_fetch(*, config=None):
+            raise RuntimeError("fetch error")
+        bad_fetch.__module__ = "oprim.fetch_event"
+        engine = assemble(_make_ft_manifest("ft-err", fetch_fn=bad_fetch))
+        result = await engine.tick()
+        assert isinstance(result, dict)
+        assert result["events_fetched"] == 0
+
+    @pytest.mark.asyncio
+    async def test_tick_ingest_called(self):
+        ingested = []
+        async def ingest_fn(*, event=None):
+            ingested.append(event)
+        ingest_fn.__module__ = "omodul.ingest"
+        engine = assemble(_make_ft_manifest("ft-ingest", ingest_fn=ingest_fn))
+        await engine.tick()
+        assert len(ingested) == 2
+
+    @pytest.mark.asyncio
+    async def test_tick_without_ingest(self):
+        """ingest=None is ok (0..1 cardinality)."""
+        engine = assemble(_make_ft_manifest("ft-no-ingest"))
+        result = await engine.tick()
+        assert result["events_processed"] == 2
+
+    @pytest.mark.asyncio
+    async def test_tick_count_increments(self):
+        engine = assemble(_make_ft_manifest("ft-tc"))
+        await engine.tick()
+        await engine.tick()
+        assert engine._tick_count == 2
+
     def test_feed_tracker_health(self):
-        m = ServiceManifest(
-            name="ft-h",
-            skeleton="feed_tracker",
-            inject={
-                "fetch_feed_oprim": [fake_fetch_rss_feed],
-                "diff_oprim": [fake_diff_detector],
-                "subscription_query": [fake_subscription_query],
-                "subscription_update": [fake_subscription_update],
-                "ingest_omodul": [fake_ingest_omodul],
-            },
-            trigger={"on_interval": 3600},
-            config={},
-        )
-        engine = assemble(m)
+        engine = assemble(_make_ft_manifest("ft-h"))
         h = engine.health()
-        assert h["details"]["fetch_providers_count"] == 1
+        assert isinstance(h, dict)
+        assert "details" in h
+
+    def test_feed_tracker_health_tick_count(self):
+        engine = assemble(_make_ft_manifest("ft-hc"))
+        h = engine.health()
         assert h["details"]["tick_count"] == 0

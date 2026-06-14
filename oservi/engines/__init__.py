@@ -26,10 +26,16 @@ from oservi.engines._base import (
 from oservi.engines import alerter as _alerter  # noqa: F401
 from oservi.engines import researcher as _researcher  # noqa: F401
 from oservi.engines import feed_tracker as _feed_tracker  # noqa: F401
+from oservi.engines import sequential_composer as _sequential_composer  # noqa: F401
+from oservi.engines import subagent_orchestrator as _subagent_orchestrator  # noqa: F401
+from oservi.engines import mcp_bridge as _mcp_bridge  # noqa: F401
 
 from oservi.engines.alerter import AlerterEngine
 from oservi.engines.researcher import ResearcherEngine
 from oservi.engines.feed_tracker import FeedTrackerEngine
+from oservi.engines.sequential_composer import SequentialComposerEngine
+from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
+from oservi.engines.mcp_bridge import McpBridgeEngine
 
 __all__ = [
     "EngineSkeleton",
@@ -40,4 +46,7 @@ __all__ = [
     "AlerterEngine",
     "ResearcherEngine",
     "FeedTrackerEngine",
+    "SequentialComposerEngine",
+    "SubagentOrchestratorEngine",
+    "McpBridgeEngine",
 ]

@@ -14,7 +14,7 @@
 完整治理: docs/GOVERNANCE.md
 """
 
-__version__ = "0.4.3"
+__version__ = "1.1.0"
 
 from oservi.manifest import ServiceManifest, ManifestValidationError
 from oservi.assembler import assemble, validate_manifest
@@ -34,6 +34,9 @@ from oservi.engines.triage import TriageEngine
 from oservi.engines.agentic_loop import AgenticLoopEngine
 from oservi.engines.action_planner import ActionPlannerEngine
 from oservi.engines.app_installer import AppInstallerEngine
+from oservi.engines.sequential_composer import SequentialComposerEngine
+from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
+from oservi.engines.mcp_bridge import McpBridgeEngine
 
 __all__ = [
     "__version__",
@@ -57,4 +60,7 @@ __all__ = [
     "AgenticLoopEngine",
     "ActionPlannerEngine",
     "AppInstallerEngine",
+    "SequentialComposerEngine",
+    "SubagentOrchestratorEngine",
+    "McpBridgeEngine",
 ]
