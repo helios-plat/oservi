@@ -64,3 +64,5 @@ __all__ = [
     "SubagentOrchestratorEngine",
     "McpBridgeEngine",
 ]
+
+from oservi.engines.channel_watcher import ChannelWatcherEngine

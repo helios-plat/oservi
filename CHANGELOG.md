@@ -120,3 +120,11 @@ FeedTrackerEngine 装配:
 - Python 3.14
 - Dependencies: obase v0.9.0 / oprim v2.24.1 / oskill v3.8.0 / omodul v1.15.0
 - B path: git+ssh tag references
+
+## [1.1.1] — 2026-06-18
+### Added
+- channel_watcher: 频道订阅引擎（复用 feed_tracker 模式）
+  注入点: list_videos(oprim/1) + filter_videos(oskill/0..1) +
+          ingest_media(omodul/1) + subscription(layer4/1)
+  流程: list → diff → filter → ingest → mark_processed（增量）
+  trigger: on_interval（默认 3600s）
