@@ -136,3 +136,11 @@ FeedTrackerEngine 装配:
           subscription(layer4/1) + filter(oskill/0..1)
   流程: search → diff → filter → download → ingest → mark_processed（增量）
   默认 6 小时扫一次，入库后清理本地 PDF
+
+## [1.2.0] — 2026-06-19
+### Added
+- source_watcher: 通用源订阅引擎（arxiv/gutenberg/oapen 统一框架）
+  注入点: searchers(oprim/1+) + download(oprim/1) + ingest(omodul/1) +
+          subscription(layer4/1) + filter(oskill/0..1)
+  config.source_type 决定调哪个 search_fn
+  config.force_ipv4 支持 OAPEN 等 IPv6 超时场景

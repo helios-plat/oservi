@@ -67,3 +67,5 @@ __all__ = [
 
 from oservi.engines.channel_watcher import ChannelWatcherEngine
 from oservi.engines.arxiv_watcher import ArxivWatcherEngine
+
+from oservi.engines.source_watcher import SourceWatcherEngine
