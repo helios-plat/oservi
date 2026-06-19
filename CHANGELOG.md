@@ -128,3 +128,11 @@ FeedTrackerEngine 装配:
           ingest_media(omodul/1) + subscription(layer4/1)
   流程: list → diff → filter → ingest → mark_processed（增量）
   trigger: on_interval（默认 3600s）
+
+## [1.1.2] — 2026-06-19
+### Added
+- arxiv_watcher: arXiv 论文订阅引擎（复用 channel_watcher 模式）
+  注入点: search(oprim/1) + download(oprim/1) + ingest(omodul/1) +
+          subscription(layer4/1) + filter(oskill/0..1)
+  流程: search → diff → filter → download → ingest → mark_processed（增量）
+  默认 6 小时扫一次，入库后清理本地 PDF

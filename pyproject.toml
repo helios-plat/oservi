@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "oservi"
-version = "1.1.1"
+version = "1.1.2"
 description = "3O service assembly layer — engine skeletons + assembler (5th pillar of helios-plat)"
 readme = "README.md"
 requires-python = ">=3.12"
