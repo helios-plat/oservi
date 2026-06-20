@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""release 前置检查：验证 __init__.py 引用的所有模块文件真实存在。"""
+"""release 前置检查：验证 __init__.py 引用的所有模块文件真实存在。
+支持：单文件模块（xxx.py）和包模块（xxx/__init__.py）。
+"""
 import ast, pathlib, sys
 
 def check(init_path: str) -> int:
@@ -13,10 +15,12 @@ def check(init_path: str) -> int:
             mod = node.module or ""
             pkg = pkg_dir.name
             if mod.startswith(f"{pkg}.") or mod.startswith(f"_{pkg}"):
-                rel = mod.replace(".", "/") + ".py"
-                full = pkg_dir.parent / rel
-                if not full.exists():
-                    missing.append(f"❌ {mod} → {full}")
+                rel = mod.replace(".", "/")
+                # 检查 .py 文件 或 目录/__init__.py
+                as_file = pkg_dir.parent / (rel + ".py")
+                as_pkg  = pkg_dir.parent / rel / "__init__.py"
+                if not as_file.exists() and not as_pkg.exists():
+                    missing.append(f"❌ {mod} → {as_file} 或 {as_pkg}")
     if missing:
         print(f"[BLOCK] {init_path} 引用了不存在的模块:")
         for m in missing:
