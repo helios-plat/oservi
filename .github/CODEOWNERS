@@ -1,0 +1,8 @@
+# 关键文件改动强制 Owner review
+/*/__init__.py        @soffy88
+/*/_version.py        @soffy88
+/*/*types*.py         @soffy88
+/pyproject.toml       @soffy88
+# 公共门面/shim 改动
+/*/quant_analysis.py  @soffy88
+/*/time_series.py     @soffy88
