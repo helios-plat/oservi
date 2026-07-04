@@ -27,6 +27,9 @@ class ServiceManifest:
                 e.g. {"evaluators": [oprim.X, oprim.Y], "channels": [obase.notify.telegram_send]}
         trigger: 触发配置 (e.g. {"on_interval": 300} / {"on_cron": "0 3 * * *"})
         config: 业务实例参数 (e.g. {"thresholds": {"warn": 0.5}})
+        depends_on: 声明式依赖拓扑 — 本服务依赖的其它服务/资源名列表
+                (e.g. ["postgres-main", "tide-collector"])。手工声明,不靠 trace 自动发现;
+                供关联/RCA 以此作因果依据(无拓扑则只能停在相关)。
 
     Example:
         >>> from oprim import detect_sector_collapse
@@ -45,6 +48,7 @@ class ServiceManifest:
     inject: dict[str, list[Callable[..., Any]]]
     trigger: dict[str, Any]
     config: dict[str, Any] = field(default_factory=dict)
+    depends_on: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -55,6 +59,8 @@ class ServiceManifest:
             raise TypeError("ServiceManifest.inject must be dict")
         if not isinstance(self.trigger, dict):
             raise TypeError("ServiceManifest.trigger must be dict")
+        if not isinstance(self.depends_on, list):
+            raise TypeError("ServiceManifest.depends_on must be list")
 
 
 class ManifestValidationError(Exception):
