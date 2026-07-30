@@ -14,7 +14,7 @@
 完整治理: docs/GOVERNANCE.md
 """
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 from oservi.manifest import ServiceManifest, ManifestValidationError
 from oservi.assembler import assemble, validate_manifest
@@ -37,6 +37,12 @@ from oservi.engines.app_installer import AppInstallerEngine
 from oservi.engines.sequential_composer import SequentialComposerEngine
 from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
 from oservi.engines.mcp_bridge import McpBridgeEngine
+from oservi.engines.saga_composer import SagaComposerEngine
+from oservi.engines.state_machine_engine import StateMachineEngine
+from oservi.engines.event_webhook_dispatcher import EventWebhookDispatcherEngine
+from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
+from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
+from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
 
 __all__ = [
     "__version__",
@@ -63,6 +69,12 @@ __all__ = [
     "SequentialComposerEngine",
     "SubagentOrchestratorEngine",
     "McpBridgeEngine",
+    "SagaComposerEngine",
+    "StateMachineEngine",
+    "EventWebhookDispatcherEngine",
+    "CronSchedulerEngine",
+    "BulkImportWorkerEngine",
+    "BulkExportWorkerEngine",
 ]
 
 from oservi.engines.channel_watcher import ChannelWatcherEngine
