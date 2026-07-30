@@ -144,3 +144,33 @@ FeedTrackerEngine 装配:
           subscription(layer4/1) + filter(oskill/0..1)
   config.source_type 决定调哪个 search_fn
   config.force_ipv4 支持 OAPEN 等 IPv6 超时场景
+
+## [1.4.0] — 2026-07-30
+
+### Added (SPEC §5 — Medusa 3O commerce vertical orchestration engines)
+
+`3O_MEDUSA_IMPLEMENTATION_SPEC.md`(平台根目录)§5 要求的 6 个引擎全部到位。
+**治理提醒**:这批引擎未走"≥2 真实项目实证"准入红线(见 docs/GOVERNANCE.md
+红线 1)——soffy 明确选择直接建骨架、事后补实证,不是治理流程被绕过而不
+自知,写在这里供 Wiki 后续把关时查阅。
+
+- `saga_composer` — 正向执行 steps,任一步返回 `{"status": "failed"}` 时逆序
+  执行 compensations(典型:支付扣款 + 库存扣减失败时的退款+释放库存)。
+- `state_machine_engine` — 状态图放在 `config["transition_map"]`(不是注入点
+  本身,通用装配器的 Injection 只理解 `list[Callable]`,没法校验
+  `dict[str, Callable]` 形状),`transitions`/`validators` 保持纯 callable 列表
+  注入契约。
+- `event_webhook_dispatcher` — `obase.mq.EventBus` 的第一个真实消费方:订阅
+  一个 topic,收到事件后 `asyncio.gather` 并发拉起所有 subscribers,单个失败
+  不拖累其余。
+- `cron_scheduler_engine` — 引入 `croniter` 新依赖做真实 cron 表达式解析
+  (原有 `alerter` 的 on_cron 只是 on_interval 的别名,没有真正解析;这次为
+  "cron_scheduler_engine"这个名字对应的语义做对)。
+- `bulk_import_worker` / `bulk_export_worker` — 流式取行(fetcher 返回同步或
+  异步可迭代对象,骨架逐行消费不囤积内存),export 侧格式化结果先写本地
+  临时文件再一次性上传(`uploader` 签名对齐 `obase.fs.FileStorage.upload`),
+  上传后清理临时文件。
+
+### Notes
+- 本地跑测试前额外装了 `pydantic-settings`(obase.config 需要,但 obase 自己
+  的 pyproject.toml 未声明这个依赖——本仓库未改 obase,仅记录此坑)。
