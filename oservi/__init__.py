@@ -16,6 +16,32 @@
 
 __version__ = "1.4.0"
 
+# Public contract for service composition.  Engines remain stateless and only
+# describe injected dependencies; application persistence stays outside this
+# package.
+__manifest__ = {
+    "package": "oservi",
+    "version": __version__,
+    "elements": [
+        {
+            "name": "ProductionExecutionEngine",
+            "kind": "oservi",
+            "module": "oservi.engines.production_execution",
+            "signature": "run(*, input_data, output_dir, config=None) -> dict",
+            "depends_on": ["omodul.operation"],
+            "pillars": ["cost", "fingerprint", "trail", "report"],
+        },
+        {
+            "name": "SequentialComposerEngine",
+            "kind": "oservi",
+            "module": "oservi.engines.sequential_composer",
+            "signature": "run(input_data) -> dict",
+            "depends_on": ["omodul.operation"],
+            "pillars": ["cost", "fingerprint", "trail", "report"],
+        },
+    ],
+}
+
 from oservi.manifest import ServiceManifest, ManifestValidationError
 from oservi.assembler import assemble, validate_manifest
 from oservi.engines._base import (
@@ -46,6 +72,7 @@ from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
 
 __all__ = [
     "__version__",
+    "__manifest__",
     # Manifest
     "ServiceManifest",
     "ManifestValidationError",
