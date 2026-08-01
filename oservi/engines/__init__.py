@@ -32,9 +32,18 @@ from oservi.engines import mcp_bridge as _mcp_bridge  # noqa: F401
 from oservi.engines import saga_composer as _saga_composer  # noqa: F401
 from oservi.engines import state_machine_engine as _state_machine_engine  # noqa: F401
 from oservi.engines import event_webhook_dispatcher as _event_webhook_dispatcher  # noqa: F401
-from oservi.engines import cron_scheduler_engine as _cron_scheduler_engine  # noqa: F401
 from oservi.engines import bulk_import_worker as _bulk_import_worker  # noqa: F401
 from oservi.engines import bulk_export_worker as _bulk_export_worker  # noqa: F401
+from oservi.engines import production_execution as _production_execution  # noqa: F401
+
+# croniter is an optional runtime dependency for the cron engine.  Do not make
+# every on-demand engine unusable in a minimal installation just by importing
+# the package root.
+try:  # pragma: no cover - depends on optional installation extras
+    from oservi.engines import cron_scheduler_engine as _cron_scheduler_engine  # noqa: F401
+except ModuleNotFoundError as exc:
+    if exc.name != "croniter":
+        raise
 
 from oservi.engines.alerter import AlerterEngine
 from oservi.engines.researcher import ResearcherEngine
@@ -45,9 +54,16 @@ from oservi.engines.mcp_bridge import McpBridgeEngine
 from oservi.engines.saga_composer import SagaComposerEngine
 from oservi.engines.state_machine_engine import StateMachineEngine
 from oservi.engines.event_webhook_dispatcher import EventWebhookDispatcherEngine
-from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
 from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
 from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
+from oservi.engines.production_execution import ProductionExecutionEngine
+
+try:  # pragma: no cover - depends on optional installation extras
+    from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
+except ModuleNotFoundError as exc:
+    if exc.name != "croniter":
+        raise
+    CronSchedulerEngine = None  # type: ignore[assignment,misc]
 
 __all__ = [
     "EngineSkeleton",
@@ -64,7 +80,10 @@ __all__ = [
     "SagaComposerEngine",
     "StateMachineEngine",
     "EventWebhookDispatcherEngine",
-    "CronSchedulerEngine",
     "BulkImportWorkerEngine",
     "BulkExportWorkerEngine",
+    "ProductionExecutionEngine",
 ]
+
+if CronSchedulerEngine is not None:
+    __all__.append("CronSchedulerEngine")

@@ -35,12 +35,12 @@ from oservi.engines.agentic_loop import AgenticLoopEngine
 from oservi.engines.action_planner import ActionPlannerEngine
 from oservi.engines.app_installer import AppInstallerEngine
 from oservi.engines.sequential_composer import SequentialComposerEngine
+from oservi.engines.production_execution import ExecutionEvent, ProductionExecutionEngine
 from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
 from oservi.engines.mcp_bridge import McpBridgeEngine
 from oservi.engines.saga_composer import SagaComposerEngine
 from oservi.engines.state_machine_engine import StateMachineEngine
 from oservi.engines.event_webhook_dispatcher import EventWebhookDispatcherEngine
-from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
 from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
 from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
 
@@ -67,6 +67,8 @@ __all__ = [
     "ActionPlannerEngine",
     "AppInstallerEngine",
     "SequentialComposerEngine",
+    "ExecutionEvent",
+    "ProductionExecutionEngine",
     "SubagentOrchestratorEngine",
     "McpBridgeEngine",
     "SagaComposerEngine",
@@ -81,3 +83,13 @@ from oservi.engines.channel_watcher import ChannelWatcherEngine
 from oservi.engines.arxiv_watcher import ArxivWatcherEngine
 
 from oservi.engines.source_watcher import SourceWatcherEngine
+
+try:  # pragma: no cover - depends on optional installation extras
+    from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
+except ModuleNotFoundError as exc:
+    if exc.name != "croniter":
+        raise
+    CronSchedulerEngine = None  # type: ignore[assignment,misc]
+
+if CronSchedulerEngine is None:
+    __all__.remove("CronSchedulerEngine")
