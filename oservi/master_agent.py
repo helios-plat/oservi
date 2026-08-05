@@ -1,0 +1,651 @@
+"""oservi.master_agent — the Master Brain: tool-routing ReAct engine.
+
+3O layer: oservi (engine assembly).
+The Master Coordinator routes user requests to backend tools / sub-agents
+(Genesis, swarm, automata, RAG, vault) and synthesizes the final answer.
+
+Everything is dependency-injected (duck-typed protocols below): the host
+assembles veya's concrete providers (tool registry, skill hub, memory bank,
+automata, swarm, rag, vault). Events are delivered via an injected ``notify``
+callback (host bridges it to SSE / fire_step). LLM calls go through an
+injected ``llm_caller``. No main-library dependency on the host.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+from collections.abc import Callable
+from typing import Any, Protocol
+
+_log = logging.getLogger(__name__)
+
+# =========================================================================
+# 依赖协议(鸭子类型 — 宿主组件只需满足方法签名)
+# =========================================================================
+
+
+class ToolRegistryProtocol(Protocol):
+    """Static tool registry (schemas + dispatch)."""
+
+    def get_all_schemas(self) -> list[dict]: ...
+    def list_tools(self) -> list[str]: ...
+    def describe(self, name: str) -> str: ...
+    def has(self, name: str) -> bool: ...
+    async def execute(self, name: str, kwargs: dict) -> str: ...
+
+
+class SkillHubProtocol(Protocol):
+    """Dynamic skill hub (reloadable tool set)."""
+
+    def get_all_schemas(self) -> list[dict]: ...
+    def list_skills(self) -> list[str]: ...
+    def describe(self, name: str) -> str: ...
+    def reload_skills(self) -> dict: ...
+    async def execute(self, name: str, kwargs: dict) -> str: ...
+
+
+class MemoryProtocol(Protocol):
+    """Cross-session preference ledger."""
+
+    def inject_subconscious(self) -> str: ...
+    def add_preference(self, **kwargs: Any) -> str: ...
+    def remove_preference(self, **kwargs: Any) -> str: ...
+
+
+class AutomataProtocol(Protocol):
+    """Background automation scheduler."""
+
+    def register_cron_task(self, cron_expr: str, task_prompt: str, task_id: str | None = None) -> str: ...
+    def remove_task(self, task_id: str) -> str: ...
+    def get_jobs(self) -> list[dict]: ...
+
+
+class SwarmProtocol(Protocol):
+    """Multi-agent Map-Reduce orchestrator."""
+
+    async def run_swarm(self, overarching_goal: str, sub_tasks: list[dict]) -> str: ...
+
+
+class RagProtocol(Protocol):
+    """Codebase semantic search engine."""
+
+    def search_context(self, query: str, top_k: int = 3) -> str: ...
+    def reindex_workspace(self, force: bool = False) -> str: ...
+
+
+class VaultProtocol(Protocol):
+    """Zero-trust secrets vault with HITL approval."""
+
+    async def execute_secure_tool(
+        self,
+        tool_name: str,
+        intent_args: dict,
+        required_vault_id: str,
+        physical_tool_callback: Callable[..., Any],
+        *,
+        timeout: float | None = None,
+    ) -> str: ...
+
+
+# =========================================================================
+# 潜意识注入: 工具使用说明书 (SOP)
+# =========================================================================
+
+MASTER_SYSTEM_PROMPT = """You are the Veya Master Coordinator, an elite AI orchestrator.
+You have access to a suite of powerful backend tools. DO NOT simulate actions; actually use the tools.
+
+# INTENT ROUTING RULES (CRITICAL):
+1. [General Knowledge / Chat]: Just answer normally. No tools needed.
+2. [Web Data / Live Research]: If asked about news, X (Twitter), or external sites, you MUST use `browser_run`.
+3. [Code Execution / Testing]: Use the `run_in_sandbox` tool. NEVER output Python code and tell the user to run it themselves. You run it.
+4. [3O Core Development]: If the user wants to build a new system module or algorithm, DO NOT write the code directly. Instead, generate a PRD. Once approved, use `delegate_to_genesis`.
+5. [Codebase Understanding]: Use `read_file_ast` / `grep` / `list_files` to explore the workspace before answering structural questions.
+6. [Avoid Duplication]: Before requesting new 3O operator development, check `search_genesis_ledger` first.
+
+Think step-by-step. If a tool fails, read the error and try again.
+Do not invent tool results. Do not ask the user to run commands for you.
+
+# MEMORY MANAGEMENT (CRITICAL):
+You possess cross-session memory.
+If the user corrects your behavior or states a preference, you MUST silently call
+`system_save_preference` BEFORE answering them. Do not ask for permission to save it.
+Just save it and acknowledge it in your reply.
+Also call it when the user says 'remember that', 'from now on', or 'always/never use X'.
+Only persist GENERAL rules that apply to future sessions — never save one-off instructions.
+If a saved rule is no longer valid, call `system_remove_preference` with its ID.
+
+# AUTOMATION (CRITICAL):
+You possess a background daemon (Automata) with Cron scheduling.
+If the user asks for something recurring — 'every morning', 'every hour', 'monitor X daily' —
+call `system_create_automation` with a proper cron expression and a self-contained task_prompt
+(the prompt YOU will receive when the trigger fires). Do NOT pretend to run periodic tasks.
+Use `system_list_automations` to check existing jobs, `system_remove_automation` to cancel one.
+
+# SWARM (CRITICAL):
+You possess a multi-agent Swarm Orchestrator (Map-Reduce).
+If the user asks for a LARGE, multi-component deliverable (full-stack app, multiple modules,
+frontend + backend + database), DO NOT try to write it all yourself. Decompose the work into
+role-based sub-tasks and call `system_spawn_swarm` with an overarching_goal and a sub_tasks array
+(roles like 'Svelte Frontend', 'FastAPI Backend', 'DB Architect').
+
+# WORKSPACE RAG (CRITICAL):
+You possess a semantic search engine over the ENTIRE local codebase (AST-indexed).
+Before modifying ANY existing code, call `system_workspace_search` FIRST to locate the exact
+functions/classes involved. Never guess file paths or duplicate existing logic.
+If the index seems stale, call `system_workspace_reindex`.
+
+# ZERO-TRUST VAULT (CRITICAL):
+Real secrets (Binance keys, AWS tokens) are NEVER exposed to you. If a task requires a
+credential, call `system_secure_exec` with only the vault_id reference and your intent.
+A human will approve via UI; the backend injects the secret into the physical tool.
+Never ask the user to paste a secret into chat.
+
+# QUANT PROTOCOL (CRITICAL — Control Plane / Data Plane separation):
+You are the strategy EXPRESSER and result ANALYST. You NEVER load or compute market data yourself.
+When the user asks for a backtest / quant strategy:
+1. Call `get_market_data_schema` to learn the columns and dtypes (schema + 5 rows only).
+2. Write strategy code defining `run_strategy(df)` that returns a df with 'daily_return' and 'cum_return'.
+3. Call `run_backtest_coprocessor` — the sandbox computes Sharpe / drawdown on millions of rows.
+4. When the coprocessor returns condensed JSON, write a SHORT research note and emit a
+   `<veya-artifact type="react">` dashboard (metric cards + ECharts curve) — inject echarts_data_json
+   verbatim into the artifact code. Do not invent metrics.
+"""
+
+
+def _truncate(text: str, limit: int = 40000) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n... [truncated {len(text) - limit} chars]"
+
+
+class MasterAgent:
+    """Master Brain: intent routing + tool dispatch + final synthesis."""
+
+    def __init__(
+        self,
+        llm_caller: Callable,
+        *,
+        tools: ToolRegistryProtocol,
+        skill_hub: SkillHubProtocol,
+        memory: MemoryProtocol,
+        swarm: SwarmProtocol,
+        vault: VaultProtocol,
+        automata_factory: Callable[[], AutomataProtocol] | None = None,
+        rag_factory: Callable[[], RagProtocol] | None = None,
+        notify: Callable[[dict], None] | None = None,
+        system_prompt: str | None = None,
+        max_rounds: int = 5,
+        temperature: float = 0.2,
+        cost_calculator: Callable[[dict], float] | None = None,
+    ):
+        """
+        Args:
+            llm_caller: Host-injected LLM function
+                (async (messages, **kwargs) -> OpenAI-format dict).
+            tools: Static tool registry (browser / genesis / ast / sandbox ...).
+            skill_hub: Dynamic skill hub (~/.veya/skills, hot-reloadable).
+            memory: Cross-session preference ledger.
+            swarm: Multi-agent swarm orchestrator.
+            vault: Zero-trust secrets vault.
+            automata_factory: Lazy factory for the background scheduler
+                (hosts with event-loop constraints inject lazily).
+            rag_factory: Lazy factory for the codebase RAG engine.
+            notify: Event callback (host bridges to SSE/fire_step); None = silent.
+            system_prompt: Override the built-in SOP.
+        """
+        self._llm_caller = llm_caller
+        self.tools = tools
+        self.skill_hub = skill_hub
+        self.memory = memory
+        self.swarm = swarm
+        self.vault = vault
+        self._automata_factory = automata_factory
+        self._rag_factory = rag_factory
+        self._automata: AutomataProtocol | None = None
+        self._rag: RagProtocol | None = None
+        self.notify = notify or (lambda _e: None)
+        self.system_prompt = system_prompt or MASTER_SYSTEM_PROMPT
+        self.max_rounds = max_rounds
+        self.temperature = temperature
+        # Host-injected cost estimator (usage dict -> USD); default 0
+        self._cost_calculator = cost_calculator
+        # Vault physical tool callbacks: tool_name -> async (**intent, _injected_secret=...)
+        self._vault_tool_callbacks: dict[str, Callable] = {}
+
+    # ── 惰性子系统 ───────────────────────────────────────────────────
+    @property
+    def automata(self) -> AutomataProtocol:
+        if self._automata is None:
+            if self._automata_factory is None:
+                raise RuntimeError("automata_factory 未注入(宿主装配缺失)")
+            self._automata = self._automata_factory()
+        return self._automata
+
+    @property
+    def rag(self) -> RagProtocol:
+        if self._rag is None:
+            if self._rag_factory is None:
+                raise RuntimeError("rag_factory 未注入(宿主装配缺失)")
+            self._rag = self._rag_factory()
+        return self._rag
+
+    # ── 潜意识注入 ───────────────────────────────────────────────────
+    def get_system_prompt(self) -> str:
+        """SOP + subconscious (cross-session ledger) + dynamic tool inventory."""
+        subconscious = self.memory.inject_subconscious()
+        return (
+            self.system_prompt
+            + subconscious
+            + "\n# AVAILABLE TOOLS (choose from these only):\n"
+            + self._tool_inventory()
+        )
+
+    def _tool_inventory(self) -> str:
+        lines = [f"- {self.tools.describe(name)}" for name in self.tools.list_tools()]
+        lines += [f"- {self.skill_hub.describe(name)}" for name in self.skill_hub.list_skills()]
+        lines.append(
+            "- system_reload_skills — Reload all skills from disk. Call this after a new skill package is installed."
+        )
+        return "\n".join(lines)
+
+    def get_system_schemas(self) -> list[dict]:
+        """Host-level tools (not unloadable): reload / memory / automation / swarm / rag / vault."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "system_reload_skills",
+                    "description": (
+                        "Reload all skills from disk. Call this if the user asks you to refresh "
+                        "your capabilities or after installing a new plugin."
+                    ),
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "system_create_automation",
+                    "description": (
+                        "Schedule a background automation task. Use this when the user asks you to "
+                        "'do something every morning', 'monitor something every hour', etc."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "cron_expr": {
+                                "type": "string",
+                                "description": "Standard Unix Cron expression (e.g., '0 9 * * *' for 9 AM daily).",
+                            },
+                            "task_prompt": {
+                                "type": "string",
+                                "description": "The exact natural language prompt you (the AI) will receive when the task triggers.",
+                            },
+                        },
+                        "required": ["cron_expr", "task_prompt"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "system_remove_automation",
+                    "description": "Cancel a scheduled background automation task by its ID.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "task_id": {"type": "string", "description": "The automation task ID to cancel"}
+                        },
+                        "required": ["task_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "system_list_automations",
+                    "description": "List all scheduled background automation tasks.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "system_save_preference",
+                    "description": (
+                        "Save a user's persistent preference, workflow rule, or correction. "
+                        "Call this IMMEDIATELY if the user corrects you (e.g., 'stop using npm, "
+                        "use pnpm' or 'my standard port is 8080'). Do NOT ask for permission."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "rule": {
+                                "type": "string",
+                                "description": "The exact rule to obey in the future, e.g., 'Always use pnpm instead of npm'.",
+                            },
+                            "context": {
+                                "type": "string",
+                                "description": "Category: 'Coding', 'Tone', 'Architecture', etc.",
+                            },
+                        },
+                        "required": ["rule", "context"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "system_remove_preference",
+                    "description": (
+                        "Remove an outdated or invalid saved preference by its memory ID "
+                        "(shown in the subconscious block, e.g. mem_20260805120000_abcd)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "memory_id": {"type": "string", "description": "The memory ID to erase"}
+                        },
+                        "required": ["memory_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "system_spawn_swarm",
+                    "description": (
+                        "Spawn a multi-agent swarm to execute complex, multi-component projects "
+                        "concurrently (Map-Reduce: decompose -> parallel workers -> master synthesis). "
+                        "Use this instead of trying to write massive codebases yourself."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "overarching_goal": {
+                                "type": "string",
+                                "description": "The big picture context for the swarm.",
+                            },
+                            "sub_tasks": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "role": {
+                                            "type": "string",
+                                            "description": "E.g., 'React Frontend Engineer', 'FastAPI Backend Dev'.",
+                                        },
+                                        "instruction": {
+                                            "type": "string",
+                                            "description": "The exact task for this agent.",
+                                        },
+                                    },
+                                    "required": ["role", "instruction"],
+                                },
+                            },
+                        },
+                        "required": ["overarching_goal", "sub_tasks"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "system_workspace_search",
+                    "description": (
+                        "Semantic search across the entire local codebase (AST-indexed functions/classes). "
+                        "Use this FIRST when you need to understand existing functions, architectures, "
+                        "or find where a specific logic is implemented, e.g. 'Where is the VWAP logic?' "
+                        "or 'Find the risk monitor'. Never guess file paths or duplicate existing logic."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Semantic query, e.g. 'VWAP calculation' or 'risk monitor leverage'.",
+                            },
+                            "top_k": {
+                                "type": "integer",
+                                "description": "number of results (optional, default 3)",
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "system_workspace_reindex",
+                    "description": "Force a full re-index of the codebase semantic engine (normally auto-incremental).",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "system_secure_exec",
+                    "description": (
+                        "Zero-trust execution: run a physical tool that needs a REAL credential. "
+                        "You pass only the vault_id reference + your intent — the secret itself is "
+                        "NEVER exposed to you. A human approves via the UI before execution. "
+                        "Use when the user asks to deploy / trade / access protected resources."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "tool_name": {"type": "string", "description": "physical tool to invoke, e.g. 'binance_place_order'"},
+                            "intent_args": {
+                                "type": "object",
+                                "description": "execution intent arguments (no secrets)",
+                            },
+                            "required_vault_id": {
+                                "type": "string",
+                                "description": "credential reference ID, e.g. 'binance_prod_key'",
+                            },
+                        },
+                        "required": ["tool_name", "intent_args", "required_vault_id"],
+                    },
+                },
+            },
+        ]
+
+    def get_all_tool_schemas(self) -> list[dict]:
+        """System tools + static tools + dynamic skills, all fed to the LLM."""
+        return self.get_system_schemas() + self.tools.get_all_schemas() + self.skill_hub.get_all_schemas()
+
+    def register_secure_tool(self, tool_name: str, callback: Callable) -> None:
+        """Register a physical tool that needs secret injection (host wiring).
+
+        callback signature: async (**intent_args, _injected_secret: str) -> str
+        """
+        self._vault_tool_callbacks[tool_name] = callback
+
+    async def handle_tool_call(self, tool_name: str, tool_args: dict) -> str:
+        """Tool routing: system-level intercept -> static tools -> dynamic skills."""
+        if tool_name == "system_reload_skills":
+            stats = self.skill_hub.reload_skills()
+            return (
+                f"System skills reloaded successfully. Now tracking "
+                f"{len(self.skill_hub.get_all_schemas())} dynamic skills "
+                f"(loaded={stats['loaded']}, skipped={stats['skipped']})."
+            )
+        if tool_name == "system_save_preference":
+            return self.memory.add_preference(**tool_args)
+        if tool_name == "system_remove_preference":
+            return self.memory.remove_preference(**tool_args)
+        if tool_name == "system_create_automation":
+            return self.automata.register_cron_task(**tool_args)
+        if tool_name == "system_remove_automation":
+            return self.automata.remove_task(**tool_args)
+        if tool_name == "system_list_automations":
+            jobs = self.automata.get_jobs()
+            if not jobs:
+                return "当前没有后台自动化任务。"
+            return "\n".join(f"- {j['id']} | next: {j['next_run']}" for j in jobs)
+        if tool_name == "system_spawn_swarm":
+            # Swarm carries its own SSE notifications; the master suspends and waits
+            result = await self.swarm.run_swarm(**tool_args)
+            return f"Swarm Synthesis Complete:\n{result}"
+        if tool_name == "system_workspace_search":
+            return self.rag.search_context(**tool_args)
+        if tool_name == "system_workspace_reindex":
+            return self.rag.reindex_workspace(force=True)
+        if tool_name == "system_secure_exec":
+            physical = tool_args.pop("tool_name")
+            vault_id = tool_args.pop("required_vault_id")
+            intent_args = tool_args.pop("intent_args", {}) or {}
+            callback = self._vault_tool_callbacks.get(physical)
+            if callback is None:
+                return f"❌ 金库未注册物理工具: {physical}"
+            return await self.vault.execute_secure_tool(
+                tool_name=physical,
+                intent_args=intent_args,
+                required_vault_id=vault_id,
+                physical_tool_callback=callback,
+            )
+        if self.tools.has(tool_name):
+            return await self.tools.execute(tool_name, tool_args)
+        return await self.skill_hub.execute(tool_name, tool_args)
+
+    # ── 无缝组装 (ReAct 循环) ───────────────────────────────────────
+    async def chat_stream(
+        self,
+        user_prompt: str,
+        *,
+        session_id: str | None = None,
+        max_rounds: int | None = None,
+    ) -> dict[str, Any]:
+        """Master entry: assemble context -> model decides -> tools execute -> synthesize."""
+        sid = session_id or str(uuid.uuid4())
+        max_rounds = max_rounds or self.max_rounds
+
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self.get_system_prompt()},
+            {"role": "user", "content": user_prompt},
+        ]
+        self.notify({"type": "master_start", "session_id": sid})
+
+        round_count = 0
+        total_cost = 0.0
+        tool_trace: list[dict] = []
+
+        while round_count < max_rounds:
+            round_count += 1
+            _log.info("[Master %s] routing round %d/%d", sid, round_count, max_rounds)
+            self.notify({"type": "master_round", "session_id": sid, "round": round_count})
+
+            # 1. Feed the LLM the JSON schemas it can understand
+            response = await self._llm_caller(
+                messages,
+                tools=self.get_all_tool_schemas(),
+                temperature=self.temperature,
+                max_tokens=8192,
+            )
+            total_cost += self._cost_of(response)
+
+            choice = (response.get("choices") or [{}])[0]
+            message = choice.get("message") or {}
+            content = message.get("content") or ""
+            tool_calls = message.get("tool_calls") or []
+            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+
+            # 2. Model answers directly (no tool calls) -> done
+            if not tool_calls:
+                self.notify({"type": "master_done", "session_id": sid, "round": round_count})
+                return {
+                    "status": "success",
+                    "final_answer": content,
+                    "rounds": round_count,
+                    "tool_calls": tool_trace,
+                    "cost_usd": round(total_cost, 6),
+                    "session_id": sid,
+                }
+
+            # 3. Intercept and execute the real physical functions, feed back
+            for tool_call in tool_calls:
+                fn = tool_call.get("function") or {}
+                tool_name = fn.get("name", "")
+                raw_args = fn.get("arguments") or "{}"
+                if isinstance(raw_args, str):
+                    try:
+                        tool_args = json.loads(raw_args)
+                    except json.JSONDecodeError:
+                        tool_args = {}
+                else:
+                    tool_args = raw_args
+                tc_id = tool_call.get("id", f"call_{tool_name}")
+                self.notify(
+                    {
+                        "type": "tool_call",
+                        "session_id": sid,
+                        "tool_name": tool_name,
+                        "tool_args": tool_args,
+                        "round": round_count,
+                    }
+                )
+                try:
+                    result = await self.handle_tool_call(tool_name, tool_args)
+                    tool_trace.append({"tool": tool_name, "status": "success"})
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": f"[Tool {tool_name} SUCCESS]\nResult:\n{_truncate(result)}",
+                        }
+                    )
+                except Exception as exc:  # noqa: BLE001 — tool failure feeds reflection, not the user
+                    tool_trace.append({"tool": tool_name, "status": "failed", "error": str(exc)})
+                    _log.warning("[Master %s] tool %s failed: %s", sid, tool_name, exc)
+                    self.notify(
+                        {
+                            "type": "tool_error",
+                            "session_id": sid,
+                            "tool_name": tool_name,
+                            "error": str(exc),
+                            "round": round_count,
+                        }
+                    )
+                    # 4. Failure fed back -> model reflects and retries differently
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": (
+                                f"[Tool {tool_name} FAILED]\nError:\n{exc!s}\n\n"
+                                f"请仔细分析上述报错, 思考哪里出了问题, 并尝试另一种方法。"
+                            ),
+                        }
+                    )
+
+        # Max rounds exceeded -> HITL
+        self.notify({"type": "master_hitl", "session_id": sid, "rounds": round_count})
+        return {
+            "status": "failed",
+            "error": "超过最大路由轮次, 主脑陷入循环, 请求人工介入 (HITL)。",
+            "rounds": round_count,
+            "tool_calls": tool_trace,
+            "cost_usd": round(total_cost, 6),
+            "session_id": sid,
+            "last_messages": messages[-3:],
+        }
+
+    async def chat(self, user_prompt: str, **kwargs: Any) -> dict[str, Any]:
+        """Lightweight single-turn chat (no tools)."""
+        response = await self._llm_caller(
+            [{"role": "user", "content": user_prompt}],
+            temperature=self.temperature,
+        )
+        content = ((response.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+        return {"status": "success", "final_answer": content, "tool_calls": []}
+
+    def _cost_of(self, response: dict) -> float:
+        if self._cost_calculator is not None:
+            try:
+                return self._cost_calculator(response)
+            except Exception:  # noqa: BLE001 — cost failure must not break the loop
+                return 0.0
+        return 0.0

@@ -81,3 +81,10 @@ from oservi.engines.channel_watcher import ChannelWatcherEngine
 from oservi.engines.arxiv_watcher import ArxivWatcherEngine
 
 from oservi.engines.source_watcher import SourceWatcherEngine
+
+from .event_workflow_engine import EventWorkflowEngine  # noqa: F401
+
+# ── Veya Agent OS 装配层 (P4 固化) ────────────────────────────────────────
+from oservi.master_agent import MASTER_SYSTEM_PROMPT, MasterAgent  # noqa: F401
+from oservi.agent_os import AgentOS, build_agent_os  # noqa: F401
+from oservi.api_gateway import ROUTE_TABLE  # noqa: F401
