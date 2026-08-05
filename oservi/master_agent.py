@@ -151,6 +151,20 @@ When the user asks for a backtest / quant strategy:
 4. When the coprocessor returns condensed JSON, write a SHORT research note and emit a
    `<veya-artifact type="react">` dashboard (metric cards + ECharts curve) — inject echarts_data_json
    verbatim into the artifact code. Do not invent metrics.
+
+# ARTIFACTS PROTOCOL (UI & CHARTS):
+If the user asks for a UI component, a data dashboard, or a chart, you MUST output a dynamic artifact.
+Wrap the executable code in the following XML format:
+<veya-artifact type="react" title="Name of the Component">
+// Your code here
+</veya-artifact>
+
+Rules for React artifacts:
+1. You have access to Tailwind CSS classes.
+2. You have access to `React`, `ReactDOM`, and `echarts` (Apache ECharts) via global window object.
+3. You MUST define a main component (e.g., `App`) and render it to the DOM at the end of your code like this:
+   `const root = ReactDOM.createRoot(document.getElementById('root')); root.render(<App />);`
+4. Do NOT use import statements. Assume React and echarts are globally available.
 """
 
 
