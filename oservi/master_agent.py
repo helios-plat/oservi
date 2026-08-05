@@ -130,6 +130,12 @@ frontend + backend + database), DO NOT try to write it all yourself. Decompose t
 role-based sub-tasks and call `system_spawn_swarm` with an overarching_goal and a sub_tasks array
 (roles like 'Svelte Frontend', 'FastAPI Backend', 'DB Architect').
 
+# EXECUTE-WHEN-ASKED (CRITICAL):
+If the user has already chosen a path (e.g. "先验证再立项" → "那你可以执行了") and then says
+"执行 / 开始 / 跑 / go / 动手", DO the chosen path with the available tools. Never re-ask,
+never store it as a mere preference, never stall waiting for more ideas. If tools are needed
+for that path (quant backtest, sandbox, genesis), call them in sequence until the path is done.
+
 # WORKSPACE RAG (CRITICAL):
 You possess a semantic search engine over the ENTIRE local codebase (AST-indexed).
 Before modifying ANY existing code, call `system_workspace_search` FIRST to locate the exact
@@ -151,6 +157,9 @@ When the user asks for a backtest / quant strategy:
 4. When the coprocessor returns condensed JSON, write a SHORT research note and emit a
    `<veya-artifact type="react">` dashboard (metric cards + ECharts curve) — inject echarts_data_json
    verbatim into the artifact code. Do not invent metrics.
+5. When the user says "execute / run it / 执行 / 开始 / 验证一下 / 按 PRD 执行" after a plan or PRD:
+   treat it as an explicit GO — call `get_market_data_schema` then `run_backtest_coprocessor` directly.
+   Do NOT re-confirm which option, do NOT just save a preference, do NOT ask for more input.
 
 # ARTIFACTS PROTOCOL (UI & CHARTS):
 If the user asks for a UI component, a data dashboard, or a chart, you MUST output a dynamic artifact.
@@ -561,7 +570,19 @@ class MasterAgent:
             call_kwargs = {"tools": self.get_all_tool_schemas(), "temperature": self.temperature, "max_tokens": 8192}
             if llm_kwargs:
                 call_kwargs.update(llm_kwargs)
-            response = await self._llm_caller(messages, **call_kwargs)
+            try:
+                response = await self._llm_caller(messages, **call_kwargs)
+            except Exception as exc:  # noqa: BLE001 — LLM 网络/鉴权失败: 明确返回而非循环
+                _log.error("[Master %s] LLM call failed: %s", sid, exc)
+                self.notify({"type": "master_error", "session_id": sid, "error": str(exc), "round": round_count})
+                return {
+                    "status": "failed",
+                    "error": f"LLM call failed: {exc}",
+                    "rounds": round_count,
+                    "tool_calls": tool_trace,
+                    "cost_usd": round(total_cost, 6),
+                    "session_id": sid,
+                }
             total_cost += self._cost_of(response)
 
             choice = (response.get("choices") or [{}])[0]
