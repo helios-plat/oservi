@@ -532,8 +532,13 @@ class MasterAgent:
         *,
         session_id: str | None = None,
         max_rounds: int | None = None,
+        llm_kwargs: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Master entry: assemble context -> model decides -> tools execute -> synthesize."""
+        """Master entry: assemble context -> model decides -> tools execute -> synthesize.
+
+        ``llm_kwargs`` are merged into every LLM call (per-request provider /
+        model / config override — e.g. the frontend's user-supplied API key).
+        """
         sid = session_id or str(uuid.uuid4())
         max_rounds = max_rounds or self.max_rounds
 
@@ -553,12 +558,10 @@ class MasterAgent:
             self.notify({"type": "master_round", "session_id": sid, "round": round_count})
 
             # 1. Feed the LLM the JSON schemas it can understand
-            response = await self._llm_caller(
-                messages,
-                tools=self.get_all_tool_schemas(),
-                temperature=self.temperature,
-                max_tokens=8192,
-            )
+            call_kwargs = {"tools": self.get_all_tool_schemas(), "temperature": self.temperature, "max_tokens": 8192}
+            if llm_kwargs:
+                call_kwargs.update(llm_kwargs)
+            response = await self._llm_caller(messages, **call_kwargs)
             total_cost += self._cost_of(response)
 
             choice = (response.get("choices") or [{}])[0]
@@ -649,9 +652,12 @@ class MasterAgent:
 
     async def chat(self, user_prompt: str, **kwargs: Any) -> dict[str, Any]:
         """Lightweight single-turn chat (no tools)."""
+        call_kwargs = {"temperature": self.temperature}
+        llm_kwargs = kwargs.pop("llm_kwargs", None)
+        if llm_kwargs:
+            call_kwargs.update(llm_kwargs)
         response = await self._llm_caller(
-            [{"role": "user", "content": user_prompt}],
-            temperature=self.temperature,
+            [{"role": "user", "content": user_prompt}], **call_kwargs
         )
         content = ((response.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         return {"status": "success", "final_answer": content, "tool_calls": []}

@@ -2,6 +2,8 @@
 
 Phase 1:
 - alerter (Aegis AlertEngine + Tide AlertSchedulerEngine 双实证, 待实施)
+- voice_agent (voice conversation engine — hicode veya voice/vision)
+- vision_agent (vision analysis engine — hicode veya voice/vision)
 
 待 ≥2 实证后入库:
 - webhook_dispatcher
@@ -35,6 +37,8 @@ from oservi.engines import event_webhook_dispatcher as _event_webhook_dispatcher
 from oservi.engines import cron_scheduler_engine as _cron_scheduler_engine  # noqa: F401
 from oservi.engines import bulk_import_worker as _bulk_import_worker  # noqa: F401
 from oservi.engines import bulk_export_worker as _bulk_export_worker  # noqa: F401
+from oservi.engines import voice_agent as _voice_agent  # noqa: F401
+from oservi.engines import vision_agent as _vision_agent  # noqa: F401
 
 from oservi.engines.alerter import AlerterEngine
 from oservi.engines.researcher import ResearcherEngine
@@ -48,6 +52,8 @@ from oservi.engines.event_webhook_dispatcher import EventWebhookDispatcherEngine
 from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
 from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
 from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
+from oservi.engines.voice_agent import VoiceAgentEngine
+from oservi.engines.vision_agent import VisionAgentEngine
 
 __all__ = [
     "EngineSkeleton",
@@ -67,4 +73,6 @@ __all__ = [
     "CronSchedulerEngine",
     "BulkImportWorkerEngine",
     "BulkExportWorkerEngine",
+    "VoiceAgentEngine",
+    "VisionAgentEngine",
 ]
