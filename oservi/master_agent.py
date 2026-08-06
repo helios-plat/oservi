@@ -233,7 +233,7 @@ class MasterAgent:
         omni_gateway: OmniGatewayProtocol | None = None,
         notify: Callable[[dict], None] | None = None,
         system_prompt: str | None = None,
-        max_rounds: int = 8,
+        max_rounds: int = 32,
         temperature: float = 0.2,
         cost_calculator: Callable[[dict], float] | None = None,
     ):
@@ -708,11 +708,27 @@ class MasterAgent:
                         }
                     )
 
-        # Max rounds exceeded -> HITL
-        self.notify({"type": "master_hitl", "session_id": sid, "rounds": round_count})
+        # 轮次护栏耗尽 (防物理死循环, 不限制智能): 返回模型最后产出, 不报 HITL。
+        # 大模型全程自由调用工具/直答; 极端情况下预算用尽也把已有内容交还用户。
+        last_content = ""
+        for m in reversed(messages):
+            if m.get("role") == "assistant" and m.get("content"):
+                last_content = m["content"]
+                break
+        self.notify({"type": "master_rounds_exhausted", "session_id": sid,
+                     "rounds": round_count})
+        if last_content:
+            return {
+                "status": "success",
+                "final_answer": last_content,
+                "rounds": round_count,
+                "tool_calls": tool_trace,
+                "cost_usd": round(total_cost, 6),
+                "session_id": sid,
+            }
         return {
             "status": "failed",
-            "error": "超过最大路由轮次, 主脑陷入循环, 请求人工介入 (HITL)。",
+            "error": "模型未在预算内产出回答 (LLM 未返回内容)。",
             "rounds": round_count,
             "tool_calls": tool_trace,
             "cost_usd": round(total_cost, 6),
