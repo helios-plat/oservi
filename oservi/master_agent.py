@@ -89,12 +89,35 @@ class VaultProtocol(Protocol):
     ) -> str: ...
 
 
+class OmniGatewayProtocol(Protocol):
+    """Omni-channel distribution gateway (host-injected, duck-typed)."""
+
+    def get_llm_schema(self) -> dict: ...
+    async def execute_dispatch(self, targets: list[str], title: str, content: str) -> str: ...
+
+
 # =========================================================================
 # 潜意识注入: 工具使用说明书 (SOP)
 # =========================================================================
 
 MASTER_SYSTEM_PROMPT = """You are the Veya Master Coordinator, an elite AI orchestrator.
 You have access to a suite of powerful backend tools. DO NOT simulate actions; actually use the tools.
+
+# MASTER DIRECTIVES (HIGHEST PRIORITY)
+## ROLE & IDENTITY
+You are the Master Coordinator of Veya OS, an industrial-grade Agentic system and quantitative research core.
+You are driven by Native Intelligence. Do not simulate a rigid "Thought-Action-Observation" loop. Do not narrate your internal thought process unless explicitly asked to explain.
+
+## COGNITIVE DIRECTIVES
+1. **Direct Action & Native Reasoning**: Trust your zero-shot and few-shot capabilities. If a user asks a conceptual question, code review, or architectural discussion, answer directly using your native intelligence. Do NOT invoke tools unnecessarily.
+2. **Tools as Physical Extensions**: You have access to a flat arsenal of tools (e.g., Z3 Neuro-Symbolic Verifier, HardenedExecutor, Quant Sandbox). Treat them as your hands. Call them ONLY when you need to interact with the physical file system, verify absolute mathematical bounds, or run heavy asynchronous computations.
+3. **Auto-Recovery over Panic**: The underlying `veya-loop` enforces extreme physical security (deny-by-default, causal circuit breakers). If a tool returns an Error, a Permission Denied, or an UNSAT core, DO NOT blindly retry. Read the traceback natively, reflect on the missing dependency or logic flaw, and dynamically adjust your strategy or rewrite the code.
+4. **Asynchronous Delegation**: If a task is computationally massive, dispatch it to the underlying DAG engines or spawn a swarm, then immediately return control to the user. Do not wait synchronously.
+
+## COMMUNICATION PROTOCOL
+- Be brutally concise, professional, and architect-oriented.
+- Zero robotic preambles (Never say "As an AI...", "Here is the code...", "I will now call the tool...").
+- Deliver the final artifacts (Code, Reports, Decisions) directly.
 
 # INTENT ROUTING RULES (CRITICAL):
 1. [General Knowledge / Chat]: Just answer normally. No tools needed.
@@ -148,6 +171,13 @@ credential, call `system_secure_exec` with only the vault_id reference and your 
 A human will approve via UI; the backend injects the secret into the physical tool.
 Never ask the user to paste a secret into chat.
 
+# DISTRIBUTION (OMNI-CHANNEL GATEWAY):
+If the user asks you to send, post, publish, or distribute content to external platforms
+(e.g. Feishu, Xiaohongshu, Twitter/X), call `system_dispatch_omni_channel` with the target
+channel names, a title, and the content. The gateway automatically decides between a
+platform's official API and RPA browser automation — you do NOT need to know which.
+Do NOT just describe how to publish manually; actually call the tool.
+
 # QUANT PROTOCOL (CRITICAL — Control Plane / Data Plane separation):
 You are the strategy EXPRESSER and result ANALYST. You NEVER load or compute market data yourself.
 When the user asks for a backtest / quant strategy:
@@ -160,6 +190,9 @@ When the user asks for a backtest / quant strategy:
 5. When the user says "execute / run it / 执行 / 开始 / 验证一下 / 按 PRD 执行" after a plan or PRD:
    treat it as an explicit GO — call `get_market_data_schema` then `run_backtest_coprocessor` directly.
    Do NOT re-confirm which option, do NOT just save a preference, do NOT ask for more input.
+6. After ONE successful backtest pass, summarize and deliver — do NOT loop optimizing
+   parameters forever. If the first pass failed, fix the strategy and retry at most once,
+   then deliver the result either way.
 
 # ARTIFACTS PROTOCOL (UI & CHARTS):
 If the user asks for a UI component, a data dashboard, or a chart, you MUST output a dynamic artifact.
@@ -197,9 +230,10 @@ class MasterAgent:
         vault: VaultProtocol,
         automata_factory: Callable[[], AutomataProtocol] | None = None,
         rag_factory: Callable[[], RagProtocol] | None = None,
+        omni_gateway: OmniGatewayProtocol | None = None,
         notify: Callable[[dict], None] | None = None,
         system_prompt: str | None = None,
-        max_rounds: int = 5,
+        max_rounds: int = 8,
         temperature: float = 0.2,
         cost_calculator: Callable[[dict], float] | None = None,
     ):
@@ -215,6 +249,7 @@ class MasterAgent:
             automata_factory: Lazy factory for the background scheduler
                 (hosts with event-loop constraints inject lazily).
             rag_factory: Lazy factory for the codebase RAG engine.
+            omni_gateway: Omni-channel distribution gateway (schema + dispatch).
             notify: Event callback (host bridges to SSE/fire_step); None = silent.
             system_prompt: Override the built-in SOP.
         """
@@ -226,6 +261,7 @@ class MasterAgent:
         self.vault = vault
         self._automata_factory = automata_factory
         self._rag_factory = rag_factory
+        self.omni_gateway = omni_gateway
         self._automata: AutomataProtocol | None = None
         self._rag: RagProtocol | None = None
         self.notify = notify or (lambda _e: None)
@@ -274,8 +310,9 @@ class MasterAgent:
         return "\n".join(lines)
 
     def get_system_schemas(self) -> list[dict]:
-        """Host-level tools (not unloadable): reload / memory / automation / swarm / rag / vault."""
-        return [
+        """Host-level tools (not unloadable): reload / memory / automation / swarm /
+        rag / vault / omni-dispatch."""
+        schemas = [
             {
                 "type": "function",
                 "function": {
@@ -475,6 +512,10 @@ class MasterAgent:
                 },
             },
         ]
+        # Omni-Channel 分发网关(宿主注入): schema 单一来源, 由网关自身提供
+        if self.omni_gateway is not None:
+            schemas.append(self.omni_gateway.get_llm_schema())
+        return schemas
 
     def get_all_tool_schemas(self) -> list[dict]:
         """System tools + static tools + dynamic skills, all fed to the LLM."""
@@ -529,6 +570,14 @@ class MasterAgent:
                 intent_args=intent_args,
                 required_vault_id=vault_id,
                 physical_tool_callback=callback,
+            )
+        if tool_name == "system_dispatch_omni_channel":
+            if self.omni_gateway is None:
+                return "❌ 分发网关未装配(宿主未注入 omni_gateway)"
+            return await self.omni_gateway.execute_dispatch(
+                targets=tool_args.get("targets") or [],
+                title=tool_args.get("title") or "",
+                content=tool_args.get("content") or "",
             )
         if self.tools.has(tool_name):
             return await self.tools.execute(tool_name, tool_args)

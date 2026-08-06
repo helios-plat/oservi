@@ -82,6 +82,9 @@ from oservi.engines.arxiv_watcher import ArxivWatcherEngine
 
 from oservi.engines.source_watcher import SourceWatcherEngine
 
+# ── 达尔文算子自进化引擎 (高阶进化模块) ────────────────────────────────────
+from oservi.engines.darwin_evolution import DarwinEvolutionEngine  # noqa: F401
+
 from .event_workflow_engine import EventWorkflowEngine  # noqa: F401
 
 # ── Veya Agent OS 装配层 (P4 固化) ────────────────────────────────────────
