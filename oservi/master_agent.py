@@ -272,6 +272,10 @@ class MasterAgent:
         self._cost_calculator = cost_calculator
         # Vault physical tool callbacks: tool_name -> async (**intent, _injected_secret=...)
         self._vault_tool_callbacks: dict[str, Callable] = {}
+        # 连续对话历史 (session_id -> messages, 进程内 LRU; 首条恒为 system)
+        self._histories: dict[str, list[dict[str, Any]]] = {}
+        self._history_cap_sessions = 200
+        self._history_max_msgs = 100
 
     # ── 惰性子系统 ───────────────────────────────────────────────────
     @property
@@ -600,10 +604,14 @@ class MasterAgent:
         sid = session_id or str(uuid.uuid4())
         max_rounds = max_rounds or self.max_rounds
 
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.get_system_prompt()},
-            {"role": "user", "content": user_prompt},
-        ]
+        # 连续对话: 复用 session 历史 (首条 system 常驻), 新会话则初始化
+        messages = self._histories.get(sid)
+        if messages is None:
+            messages = [{"role": "system", "content": self.get_system_prompt()}]
+            self._histories[sid] = messages
+            if len(self._histories) > self._history_cap_sessions:
+                del self._histories[next(iter(self._histories))]
+        messages.append({"role": "user", "content": user_prompt})
         self.notify({"type": "master_start", "session_id": sid})
 
         round_count = 0
@@ -639,6 +647,8 @@ class MasterAgent:
             content = message.get("content") or ""
             tool_calls = message.get("tool_calls") or []
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+            if len(messages) > self._history_max_msgs:
+                messages[:] = [messages[0]] + messages[-(self._history_max_msgs - 1):]
 
             # 2. Model answers directly (no tool calls) -> done
             if not tool_calls:
