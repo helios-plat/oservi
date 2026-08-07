@@ -99,7 +99,10 @@ class GoalDrivenLoop:
             await self.driver.kernel.append(
                 EVENT_HEARTBEAT, {"loop": str(uuid.uuid4())[:8]})
         except Exception:  # noqa: BLE001 - 心跳失败不阻断 (统计仍更新)
-            pass
+            import logging
+
+            logging.getLogger("veya.goal_driven").warning(
+                "heartbeat append failed", exc_info=True)
         if self.on_heartbeat is not None:
             self.on_heartbeat(self.driver.goal_id)
 
