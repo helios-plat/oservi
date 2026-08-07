@@ -16,33 +16,47 @@
 
 __version__ = "1.4.0"
 
-from oservi.manifest import ServiceManifest, ManifestValidationError
 from oservi.assembler import assemble, validate_manifest
 from oservi.engines._base import (
     EngineSkeleton,
     Injection,
-    register_skeleton,
     get_skeleton,
     list_skeletons,
+    register_skeleton,
 )
+from oservi.engines.action_planner import ActionPlannerEngine
+from oservi.engines.agentic_loop import AgenticLoopEngine
 
 # 引擎 (触发注册到 registry)
 from oservi.engines.alerter import AlerterEngine
-from oservi.engines.researcher import ResearcherEngine
-from oservi.engines.feed_tracker import FeedTrackerEngine
-from oservi.engines.triage import TriageEngine
-from oservi.engines.agentic_loop import AgenticLoopEngine
-from oservi.engines.action_planner import ActionPlannerEngine
 from oservi.engines.app_installer import AppInstallerEngine
-from oservi.engines.sequential_composer import SequentialComposerEngine
-from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
-from oservi.engines.mcp_bridge import McpBridgeEngine
-from oservi.engines.saga_composer import SagaComposerEngine
-from oservi.engines.state_machine_engine import StateMachineEngine
-from oservi.engines.event_webhook_dispatcher import EventWebhookDispatcherEngine
-from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
-from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
 from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
+from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
+from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
+from oservi.engines.event_webhook_dispatcher import EventWebhookDispatcherEngine
+from oservi.engines.feed_tracker import FeedTrackerEngine
+from oservi.engines.mcp_bridge import McpBridgeEngine
+from oservi.engines.researcher import ResearcherEngine
+from oservi.engines.saga_composer import SagaComposerEngine
+from oservi.engines.sequential_composer import SequentialComposerEngine
+from oservi.engines.state_machine_engine import StateMachineEngine
+from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
+from oservi.engines.triage import TriageEngine
+from oservi.manifest import ManifestValidationError, ServiceManifest
+
+# 三框架运行时统一桥 (prime-agent / pi / agentscope)
+from oservi.runtime_bridge import (
+    ALL_RUNTIMES,
+    AgentRuntime,
+    AgentScopeBridgeRuntime,
+    PiBridgeRuntime,
+    PrimeAgentRuntime,
+    agentscope_bridge,
+    pi_bridge,
+    prime_agent_runtime,
+    register_all_runtimes,
+    register_runtime,
+)
 
 __all__ = [
     "__version__",
@@ -77,17 +91,16 @@ __all__ = [
     "BulkExportWorkerEngine",
 ]
 
-from oservi.engines.channel_watcher import ChannelWatcherEngine
+from oservi.agent_os import AgentOS, build_agent_os  # noqa: F401
+from oservi.api_gateway import ROUTE_TABLE  # noqa: F401
 from oservi.engines.arxiv_watcher import ArxivWatcherEngine
-
-from oservi.engines.source_watcher import SourceWatcherEngine
+from oservi.engines.channel_watcher import ChannelWatcherEngine
 
 # ── 达尔文算子自进化引擎 (高阶进化模块) ────────────────────────────────────
 from oservi.engines.darwin_evolution import DarwinEvolutionEngine  # noqa: F401
-
-from .event_workflow_engine import EventWorkflowEngine  # noqa: F401
+from oservi.engines.source_watcher import SourceWatcherEngine
 
 # ── Veya Agent OS 装配层 (P4 固化) ────────────────────────────────────────
 from oservi.master_agent import MASTER_SYSTEM_PROMPT, MasterAgent  # noqa: F401
-from oservi.agent_os import AgentOS, build_agent_os  # noqa: F401
-from oservi.api_gateway import ROUTE_TABLE  # noqa: F401
+
+from .event_workflow_engine import EventWorkflowEngine  # noqa: F401
