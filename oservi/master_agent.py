@@ -57,7 +57,9 @@ class MemoryProtocol(Protocol):
 class AutomataProtocol(Protocol):
     """Background automation scheduler."""
 
-    def register_cron_task(self, cron_expr: str, task_prompt: str, task_id: str | None = None) -> str: ...
+    def register_cron_task(
+        self, cron_expr: str, task_prompt: str, task_id: str | None = None
+    ) -> str: ...
     def remove_task(self, task_id: str) -> str: ...
     def get_jobs(self) -> list[dict]: ...
 
@@ -360,7 +362,10 @@ class MasterAgent:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "task_id": {"type": "string", "description": "The automation task ID to cancel"}
+                            "task_id": {
+                                "type": "string",
+                                "description": "The automation task ID to cancel",
+                            }
                         },
                         "required": ["task_id"],
                     },
@@ -501,7 +506,10 @@ class MasterAgent:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "tool_name": {"type": "string", "description": "physical tool to invoke, e.g. 'binance_place_order'"},
+                            "tool_name": {
+                                "type": "string",
+                                "description": "physical tool to invoke, e.g. 'binance_place_order'",
+                            },
                             "intent_args": {
                                 "type": "object",
                                 "description": "execution intent arguments (no secrets)",
@@ -523,7 +531,11 @@ class MasterAgent:
 
     def get_all_tool_schemas(self) -> list[dict]:
         """System tools + static tools + dynamic skills, all fed to the LLM."""
-        return self.get_system_schemas() + self.tools.get_all_schemas() + self.skill_hub.get_all_schemas()
+        return (
+            self.get_system_schemas()
+            + self.tools.get_all_schemas()
+            + self.skill_hub.get_all_schemas()
+        )
 
     def register_secure_tool(self, tool_name: str, callback: Callable) -> None:
         """Register a physical tool that needs secret injection (host wiring).
@@ -595,11 +607,17 @@ class MasterAgent:
         session_id: str | None = None,
         max_rounds: int | None = None,
         llm_kwargs: dict[str, Any] | None = None,
+        long_task: Any | None = None,
     ) -> dict[str, Any]:
         """Master entry: assemble context -> model decides -> tools execute -> synthesize.
 
         ``llm_kwargs`` are merged into every LLM call (per-request provider /
         model / config override — e.g. the frontend's user-supplied API key).
+
+        ``long_task``: optional long-task driver hook (duck typing, host-injected;
+        default None = behavior identical to pre-integration). Provides
+        ``pre_round()`` / ``post_round()``: every round reads projection + quota
+        check before LLM, writes todo/evidence/quota after tool execution.
         """
         sid = session_id or str(uuid.uuid4())
         max_rounds = max_rounds or self.max_rounds
@@ -623,15 +641,68 @@ class MasterAgent:
             _log.info("[Master %s] routing round %d/%d", sid, round_count, max_rounds)
             self.notify({"type": "master_round", "session_id": sid, "round": round_count})
 
+            # ── 长程任务: 每轮读投影 + 配额检查 (可选钩子, 默认 None 零影响) ──
+            if long_task is not None:
+                try:
+                    _lt_ctx = await long_task.pre_round()
+                    if not _lt_ctx.quota_ok:
+                        self.notify({"type": "master_paused", "session_id": sid, "reason": "quota"})
+                        return {
+                            "status": "paused_by_quota",
+                            "final_answer": (
+                                f"[long task paused: quota exhausted "
+                                f"(remaining ${_lt_ctx.remaining_usd})]"
+                            ),
+                            "rounds": round_count - 1,
+                            "tool_calls": tool_trace,
+                            "cost_usd": round(total_cost, 6),
+                            "session_id": sid,
+                        }
+                    # 首轮注入 next_action 提示 (后续轮次在历史里, 避免污染)
+                    if round_count == 1 and _lt_ctx.prompt_suffix:
+                        messages[-1] = {
+                            **messages[-1],
+                            "content": messages[-1]["content"] + _lt_ctx.prompt_suffix,
+                        }
+                except Exception as _lt_exc:  # noqa: BLE001 — 钩子失败转明确错误, 不崩循环
+                    _log.error("[Master %s] long_task hook error: %s", sid, _lt_exc)
+                    self.notify(
+                        {
+                            "type": "master_error",
+                            "session_id": sid,
+                            "error": f"long task hook error: {_lt_exc}",
+                            "round": round_count,
+                        }
+                    )
+                    return {
+                        "status": "failed",
+                        "error": f"long task hook error: {_lt_exc}",
+                        "rounds": round_count - 1,
+                        "tool_calls": tool_trace,
+                        "cost_usd": round(total_cost, 6),
+                        "session_id": sid,
+                    }
+
             # 1. Feed the LLM the JSON schemas it can understand
-            call_kwargs = {"tools": self.get_all_tool_schemas(), "temperature": self.temperature, "max_tokens": 8192}
+            call_kwargs = {
+                "tools": self.get_all_tool_schemas(),
+                "temperature": self.temperature,
+                "max_tokens": 8192,
+            }
             if llm_kwargs:
                 call_kwargs.update(llm_kwargs)
             try:
                 response = await self._llm_caller(messages, **call_kwargs)
             except Exception as exc:  # noqa: BLE001 — LLM 网络/鉴权失败: 明确返回而非循环
                 _log.error("[Master %s] LLM call failed: %s", sid, exc)
-                self.notify({"type": "master_error", "session_id": sid, "error": str(exc), "round": round_count})
+                self.notify(
+                    {
+                        "type": "master_error",
+                        "session_id": sid,
+                        "error": str(exc),
+                        "round": round_count,
+                    }
+                )
                 return {
                     "status": "failed",
                     "error": f"LLM call failed: {exc}",
@@ -648,7 +719,7 @@ class MasterAgent:
             tool_calls = message.get("tool_calls") or []
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
             if len(messages) > self._history_max_msgs:
-                messages[:] = [messages[0]] + messages[-(self._history_max_msgs - 1):]
+                messages[:] = [messages[0]] + messages[-(self._history_max_msgs - 1) :]
 
             # 2. Model answers directly (no tool calls) -> done
             if not tool_calls:
@@ -718,6 +789,21 @@ class MasterAgent:
                         }
                     )
 
+            # ── 长程任务: 每轮工具执行后写 todo/evidence/配额 (可选钩子) ──
+            if long_task is not None:
+                try:
+                    await long_task.post_round({"cost_usd": total_cost})
+                except Exception as _lt_exc:  # noqa: BLE001 — 钩子失败转明确错误
+                    _log.error("[Master %s] long_task post_round error: %s", sid, _lt_exc)
+                    return {
+                        "status": "failed",
+                        "error": f"long task hook error: {_lt_exc}",
+                        "rounds": round_count,
+                        "tool_calls": tool_trace,
+                        "cost_usd": round(total_cost, 6),
+                        "session_id": sid,
+                    }
+
         # 轮次护栏耗尽 (防物理死循环, 不限制智能): 返回模型最后产出, 不报 HITL。
         # 大模型全程自由调用工具/直答; 极端情况下预算用尽也把已有内容交还用户。
         last_content = ""
@@ -725,8 +811,7 @@ class MasterAgent:
             if m.get("role") == "assistant" and m.get("content"):
                 last_content = m["content"]
                 break
-        self.notify({"type": "master_rounds_exhausted", "session_id": sid,
-                     "rounds": round_count})
+        self.notify({"type": "master_rounds_exhausted", "session_id": sid, "rounds": round_count})
         if last_content:
             return {
                 "status": "success",
@@ -752,9 +837,7 @@ class MasterAgent:
         llm_kwargs = kwargs.pop("llm_kwargs", None)
         if llm_kwargs:
             call_kwargs.update(llm_kwargs)
-        response = await self._llm_caller(
-            [{"role": "user", "content": user_prompt}], **call_kwargs
-        )
+        response = await self._llm_caller([{"role": "user", "content": user_prompt}], **call_kwargs)
         content = ((response.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         return {"status": "success", "final_answer": content, "tool_calls": []}
 
