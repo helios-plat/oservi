@@ -104,3 +104,10 @@ from oservi.engines.source_watcher import SourceWatcherEngine
 from oservi.master_agent import MASTER_SYSTEM_PROMPT, MasterAgent  # noqa: F401
 
 from .event_workflow_engine import EventWorkflowEngine  # noqa: F401
+
+# G6 确定性基准评测 (Vigla harness 复刻)
+from oservi.agent_bench_harness import (  # noqa: E402
+    BenchResult,
+    BenchTask,
+    agent_bench_harness,
+)
