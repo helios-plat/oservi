@@ -111,3 +111,10 @@ from oservi.agent_bench_harness import (  # noqa: E402
     BenchTask,
     agent_bench_harness,
 )
+
+# G2 团队实时监督 (pi-workbench 复刻)
+from oservi.agent_team_monitor import (  # noqa: E402
+    AgentLiveState,
+    TeamMonitor,
+    monitor_team,
+)
