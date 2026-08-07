@@ -91,7 +91,20 @@ __all__ = [
     "BulkExportWorkerEngine",
 ]
 
+# G6 确定性基准评测 (Vigla harness 复刻)
+from oservi.agent_bench_harness import (
+    BenchResult,
+    BenchTask,
+    agent_bench_harness,
+)
 from oservi.agent_os import AgentOS, build_agent_os  # noqa: F401
+
+# G2 团队实时监督 (pi-workbench 复刻)
+from oservi.agent_team_monitor import (
+    AgentLiveState,
+    TeamMonitor,
+    monitor_team,
+)
 from oservi.api_gateway import ROUTE_TABLE  # noqa: F401
 from oservi.engines.arxiv_watcher import ArxivWatcherEngine
 from oservi.engines.channel_watcher import ChannelWatcherEngine
@@ -100,37 +113,30 @@ from oservi.engines.channel_watcher import ChannelWatcherEngine
 from oservi.engines.darwin_evolution import DarwinEvolutionEngine  # noqa: F401
 from oservi.engines.source_watcher import SourceWatcherEngine
 
-# ── Veya Agent OS 装配层 (P4 固化) ────────────────────────────────────────
-from oservi.master_agent import MASTER_SYSTEM_PROMPT, MasterAgent  # noqa: F401
-
-from .event_workflow_engine import EventWorkflowEngine  # noqa: F401
-
-# G6 确定性基准评测 (Vigla harness 复刻)
-from oservi.agent_bench_harness import (  # noqa: E402
-    BenchResult,
-    BenchTask,
-    agent_bench_harness,
-)
-
-# G2 团队实时监督 (pi-workbench 复刻)
-from oservi.agent_team_monitor import (  # noqa: E402
-    AgentLiveState,
-    TeamMonitor,
-    monitor_team,
-)
-
-# G8 触发器统一注册 (KiroCrew 复刻)
-from oservi.trigger_register import (  # noqa: E402
-    TRIGGER_KINDS,
-    TriggerRegistry,
-    trigger_register,
+# Goal-Driven 长程编排事务 (goal-driven 3O 内化)
+from oservi.goal_driven_loop import (
+    CompletionReport,
+    GoalDrivenLoop,
+    LoopStats,
 )
 
 # 长程编码任务驱动 (事件溯源 + 投影状态机 + 配额治理装配)
-from oservi.long_task_driver import (  # noqa: E402
+from oservi.long_task_driver import (
     LongTaskDriver,
     LongTaskError,
     RoundContext,
     RoundOutcome,
     open_long_task,
 )
+
+# ── Veya Agent OS 装配层 (P4 固化) ────────────────────────────────────────
+from oservi.master_agent import MASTER_SYSTEM_PROMPT, MasterAgent  # noqa: F401
+
+# G8 触发器统一注册 (KiroCrew 复刻)
+from oservi.trigger_register import (
+    TRIGGER_KINDS,
+    TriggerRegistry,
+    trigger_register,
+)
+
+from .event_workflow_engine import EventWorkflowEngine  # noqa: F401
