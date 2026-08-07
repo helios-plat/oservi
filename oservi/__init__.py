@@ -118,3 +118,10 @@ from oservi.agent_team_monitor import (  # noqa: E402
     TeamMonitor,
     monitor_team,
 )
+
+# G8 触发器统一注册 (KiroCrew 复刻)
+from oservi.trigger_register import (  # noqa: E402
+    TRIGGER_KINDS,
+    TriggerRegistry,
+    trigger_register,
+)
