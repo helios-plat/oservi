@@ -51,7 +51,7 @@ InjectionKind = Literal["oprim", "oskill", "omodul", "obase", "layer4"]
 @dataclass
 class Injection:
     kind: InjectionKind
-    cardinality: str   # "1" | "0..1" | "1..n" | "0..n"
+    cardinality: str  # "1" | "0..1" | "1..n" | "0..n"
     description: str
 
 
@@ -59,12 +59,14 @@ class Injection:
 # EngineSkeleton 基类（§8.6 标准模式）
 # ---------------------------------------------------------------------------
 
+
 class ManifestValidationError(Exception):
     pass
 
 
 class EngineSkeleton:
     """所有 oservice 引擎的基类。"""
+
     injection_points: dict[str, Injection] = {}
 
     def __init__(self, *, trigger: dict, config: dict | None = None):
@@ -107,23 +109,27 @@ class EngineSkeleton:
 # ToolSpec：Layer 4 tool-adapter 契约
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ToolSpec:
     """Layer 4 tool-adapter 包装。name + JSON schema + 可调用实现。"""
+
     name: str
     description: str
-    input_schema: dict          # JSON Schema object
-    callable: Callable          # async (input_dict) -> Any
-    readonly: bool = False      # plan 模式只允许 readonly=True 工具
+    input_schema: dict  # JSON Schema object
+    callable: Callable  # async (input_dict) -> Any
+    readonly: bool = False  # plan 模式只允许 readonly=True 工具
 
 
 # ---------------------------------------------------------------------------
 # 会话状态（运行时，不持久化业务态）
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SessionState:
     """引擎运行时状态（不是业务态）。业务 session 数据在 Layer 4 + obase.persistence。"""
+
     session_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     messages: list[dict] = field(default_factory=list)
     todos: list[dict] = field(default_factory=list)
@@ -139,6 +145,7 @@ class SessionState:
 # AgenticLoop 引擎
 # ---------------------------------------------------------------------------
 
+
 class AgenticLoop(EngineSkeleton):
     """
     oservice: agentic_loop
@@ -147,44 +154,52 @@ class AgenticLoop(EngineSkeleton):
 
     injection_points = {
         "llm_caller": Injection(
-            kind="oprim", cardinality="1",
-            description="主 LLM 调用，callable(messages, tools, max_tokens, thinking_budget) -> dict"
+            kind="oprim",
+            cardinality="1",
+            description="主 LLM 调用，callable(messages, tools, max_tokens, thinking_budget) -> dict",
         ),
         "tools": Injection(
-            kind="layer4", cardinality="1..n",
-            description="工具适配器列表（ToolSpec），每个带 JSON schema + async callable"
+            kind="layer4",
+            cardinality="1..n",
+            description="工具适配器列表（ToolSpec），每个带 JSON schema + async callable",
         ),
         "hook_dispatch": Injection(
-            kind="layer4", cardinality="0..1",
-            description="Hook 路由器：async (event, payload) -> {decision, modified_payload}"
+            kind="layer4",
+            cardinality="0..1",
+            description="Hook 路由器：async (event, payload) -> {decision, modified_payload}",
         ),
         "permission_gate": Injection(
-            kind="layer4", cardinality="0..1",
-            description="权限决策：(tool_call) -> 'allow'|'deny'|'ask'"
+            kind="layer4",
+            cardinality="0..1",
+            description="权限决策：(tool_call) -> 'allow'|'deny'|'ask'",
         ),
         "skill_selector": Injection(
-            kind="oskill", cardinality="0..1",
-            description="渐进式 skill 选择：(task, context) -> list[SkillContext]"
+            kind="oskill",
+            cardinality="0..1",
+            description="渐进式 skill 选择：(task, context) -> list[SkillContext]",
         ),
         "todo_tracker": Injection(
-            kind="layer4", cardinality="0..1",
-            description="Todo 状态维护：(todos, update) -> list[dict]"
+            kind="layer4",
+            cardinality="0..1",
+            description="Todo 状态维护：(todos, update) -> list[dict]",
         ),
         "thinking_controller": Injection(
-            kind="oskill", cardinality="0..1",
-            description="扩展思考 token 预算：(prompt) -> int"
+            kind="oskill", cardinality="0..1", description="扩展思考 token 预算：(prompt) -> int"
         ),
         "compactor": Injection(
-            kind="omodul", cardinality="0..1",
-            description="上下文压缩事务：(config, input, output_dir) -> dict"
+            kind="omodul",
+            cardinality="0..1",
+            description="上下文压缩事务：(config, input, output_dir) -> dict",
         ),
         "changeset_applier": Injection(
-            kind="omodul", cardinality="0..1",
-            description="编辑落盘事务：(config, input, output_dir) -> dict"
+            kind="omodul",
+            cardinality="0..1",
+            description="编辑落盘事务：(config, input, output_dir) -> dict",
         ),
         "subagent_runner": Injection(
-            kind="omodul", cardinality="0..1",
-            description="子 agent 调用事务：(config, input, output_dir) -> dict"
+            kind="omodul",
+            cardinality="0..1",
+            description="子 agent 调用事务：(config, input, output_dir) -> dict",
         ),
     }
 
@@ -266,9 +281,7 @@ class AgenticLoop(EngineSkeleton):
 
     def _estimate_tokens(self, messages: list[dict]) -> int:
         """粗估 token 数（生产版接 obase.TokenCounter）。"""
-        total_chars = sum(
-            len(json.dumps(m, ensure_ascii=False)) for m in messages
-        )
+        total_chars = sum(len(json.dumps(m, ensure_ascii=False)) for m in messages)
         return total_chars // 4  # ~4 chars/token
 
     def _needs_compaction(self, messages: list[dict]) -> bool:
@@ -284,13 +297,24 @@ class AgenticLoop(EngineSkeleton):
         system_prompt: str = "",
         on_step: Callable[[dict], None] | None = None,
         on_token: Callable[[str], None] | None = None,
+        long_task: Any | None = None,
     ) -> dict:
         """
         执行一次完整的 agentic session（on_demand）。
 
+        Args:
+            task: 用户任务。
+            system_prompt: 额外系统提示。
+            on_step: 每步事件回调。
+            on_token: token 流回调。
+            long_task: 可选长程任务驱动钩子 (duck typing, 宿主注入; 默认 None
+                时行为与未接线完全一致)。提供 pre_round()/post_round():
+                每轮开始前读投影 + 配额检查, 每轮结束后写 todo/evidence/配额。
+
         返回 {
             "result": str,           # LLM 最终输出
-            "status": "completed" | "interrupted" | "budget_exceeded" | "failed",
+            "status": "completed" | "interrupted" | "budget_exceeded" |
+                      "paused_by_quota" | "failed",
             "iterations": int,
             "cost_usd": float,
             "session_id": str,
@@ -318,31 +342,85 @@ class AgenticLoop(EngineSkeleton):
         if selector:
             skills = selector(task, extra_context)
             if skills:
-                extra_context = "\n\n".join(
-                    s.get("body", "") for s in skills if s.get("body")
-                )
+                extra_context = "\n\n".join(s.get("body", "") for s in skills if s.get("body"))
                 state.record(event="skills_loaded", count=len(skills))
 
         # ── 初始系统 prompt ───────────────────────────────────────────────
-        effective_system = _build_system(
-            system_prompt, self.mode, self._tools, extra_context
-        )
+        effective_system = _build_system(system_prompt, self.mode, self._tools, extra_context)
 
         # 把 system 注入为 messages[0]（部分 provider 不支持 system 参数时的兼容做法）
-        state.messages = [
-            {"role": "user", "content": task}
-        ]
+        state.messages = [{"role": "user", "content": task}]
 
         tool_schemas = self._build_tool_schemas()
         final_text = ""
         status = "completed"
 
         if on_step:
-            on_step({"event": "session_start", "session_id": state.session_id,
-                     "mode": self.mode, "task_preview": task[:120]})
+            on_step(
+                {
+                    "event": "session_start",
+                    "session_id": state.session_id,
+                    "mode": self.mode,
+                    "task_preview": task[:120],
+                }
+            )
 
         # ── SessionStart hook ─────────────────────────────────────────────
         await self._hook("SessionStart", {"session_id": state.session_id})
+
+        # ── 长程任务: 每轮开始前读投影 + 配额检查 (可选钩子) ────────────
+        if long_task is not None:
+            try:
+                _lt_ctx = await long_task.pre_round()
+                if not _lt_ctx.quota_ok:
+                    status = "paused_by_quota"
+                    final_text = (
+                        f"[long task paused: quota exhausted (remaining ${_lt_ctx.remaining_usd})]"
+                    )
+                    state.record(event="paused_by_quota", remaining_usd=_lt_ctx.remaining_usd)
+                    if on_step:
+                        on_step(
+                            {
+                                "event": "session_done",
+                                "status": status,
+                                "iterations": 0,
+                                "cost_usd": round(self._total_cost, 6),
+                            }
+                        )
+                    return {
+                        "result": final_text,
+                        "status": status,
+                        "iterations": 0,
+                        "cost_usd": round(self._total_cost, 6),
+                        "in_tokens": self._total_in_tok,
+                        "out_tokens": self._total_out_tok,
+                        "session_id": state.session_id,
+                        "events": state.events,
+                    }
+                task = task + _lt_ctx.prompt_suffix  # next_action 提示注入 LLM
+            except Exception as _lt_exc:
+                status = "failed"
+                final_text = f"[long task hook error: {_lt_exc}]"
+                state.record(event="long_task_error", error=str(_lt_exc))
+                if on_step:
+                    on_step(
+                        {
+                            "event": "session_done",
+                            "status": status,
+                            "iterations": 0,
+                            "cost_usd": round(self._total_cost, 6),
+                        }
+                    )
+                return {
+                    "result": final_text,
+                    "status": status,
+                    "iterations": 0,
+                    "cost_usd": round(self._total_cost, 6),
+                    "in_tokens": self._total_in_tok,
+                    "out_tokens": self._total_out_tok,
+                    "session_id": state.session_id,
+                    "events": state.events,
+                }
 
         try:
             for iteration in range(self.max_iterations):
@@ -351,9 +429,7 @@ class AgenticLoop(EngineSkeleton):
 
                 # 上下文压缩检查
                 if self._needs_compaction(state.messages):
-                    state.messages = await self._maybe_compact(
-                        state.messages, state, on_step
-                    )
+                    state.messages = await self._maybe_compact(state.messages, state, on_step)
 
                 # ── LLM 调用 ──────────────────────────────────────────────
                 # 生产版：调 oprim.llm_complete(messages, caller=self._llm, ...)
@@ -382,11 +458,11 @@ class AgenticLoop(EngineSkeleton):
 
                 if self._total_cost > self.budget_usd:
                     status = "budget_exceeded"
-                    state.record(event="budget_exceeded",
-                                 total_usd=self._total_cost, limit=self.budget_usd)
+                    state.record(
+                        event="budget_exceeded", total_usd=self._total_cost, limit=self.budget_usd
+                    )
                     if on_step:
-                        on_step({"event": "budget_exceeded",
-                                 "total_usd": self._total_cost})
+                        on_step({"event": "budget_exceeded", "total_usd": self._total_cost})
                     break
 
                 content = response.get("content", [])
@@ -400,8 +476,7 @@ class AgenticLoop(EngineSkeleton):
                             on_token(final_text)
                         state.record(event="text", preview=final_text[:80])
                     elif block.get("type") == "thinking":
-                        state.record(event="thinking",
-                                     preview=block.get("thinking", "")[:60])
+                        state.record(event="thinking", preview=block.get("thinking", "")[:60])
 
                 if stop_reason != "tool_use":
                     state.record(event="loop_done", reason=stop_reason, iter=iteration)
@@ -412,24 +487,32 @@ class AgenticLoop(EngineSkeleton):
                 tool_results_content = []
 
                 for tool_use in tool_uses:
-                    tr = await self._handle_tool_use(
-                        tool_use, state, on_step
-                    )
+                    tr = await self._handle_tool_use(tool_use, state, on_step)
                     tool_results_content.append(tr)
 
                 # 更新 messages
                 state.messages.append({"role": "assistant", "content": content})
-                state.messages.append({
-                    "role": "user", "content": tool_results_content
-                })
+                state.messages.append({"role": "user", "content": tool_results_content})
 
                 if on_step:
-                    on_step({
-                        "event": "iteration_done",
-                        "iteration": iteration,
-                        "n_tools": len(tool_uses),
-                        "cost_usd": round(self._total_cost, 6),
-                    })
+                    on_step(
+                        {
+                            "event": "iteration_done",
+                            "iteration": iteration,
+                            "n_tools": len(tool_uses),
+                            "cost_usd": round(self._total_cost, 6),
+                        }
+                    )
+
+                # ── 长程任务: 每轮结束后写 todo/evidence/配额 (可选钩子) ──
+                if long_task is not None:
+                    try:
+                        await long_task.post_round({"cost_usd": call_cost})
+                    except Exception as _lt_exc:
+                        status = "failed"
+                        final_text = f"[long task hook error: {_lt_exc}]"
+                        state.record(event="long_task_error", error=str(_lt_exc))
+                        break
 
         except asyncio.CancelledError:
             status = "interrupted"
@@ -441,17 +524,25 @@ class AgenticLoop(EngineSkeleton):
             final_text = f"[engine error: {exc}]"
         finally:
             # Stop hook
-            await self._hook("Stop", {
-                "session_id": state.session_id,
-                "iterations": state.iteration,
-                "status": status,
-            })
+            await self._hook(
+                "Stop",
+                {
+                    "session_id": state.session_id,
+                    "iterations": state.iteration,
+                    "status": status,
+                },
+            )
             self._running = False
 
         if on_step:
-            on_step({"event": "session_done", "status": status,
-                     "iterations": state.iteration + 1,
-                     "cost_usd": round(self._total_cost, 6)})
+            on_step(
+                {
+                    "event": "session_done",
+                    "status": status,
+                    "iterations": state.iteration + 1,
+                    "cost_usd": round(self._total_cost, 6),
+                }
+            )
 
         return {
             "result": final_text,
@@ -481,20 +572,15 @@ class AgenticLoop(EngineSkeleton):
         tool_input = tool_use.get("input", {})
         tool_use_id = tool_use.get("id", str(uuid.uuid4()))
 
-        state.record(event="tool_call", tool=tool_name,
-                     input_preview=str(tool_input)[:150])
+        state.record(event="tool_call", tool=tool_name, input_preview=str(tool_input)[:150])
         if on_step:
             on_step({"event": "tool_call", "tool": tool_name, "input": tool_input})
 
         # ── PreToolUse hook（主安全检查点）────────────────────────────────
-        hook_result = await self._hook(
-            "PreToolUse", {"tool": tool_name, "input": tool_input}
-        )
+        hook_result = await self._hook("PreToolUse", {"tool": tool_name, "input": tool_input})
         if hook_result.get("decision") == "block":
             state.record(event="hook_blocked", tool=tool_name)
-            return _tool_result_block(
-                tool_use_id, f"[blocked by PreToolUse hook: {tool_name}]"
-            )
+            return _tool_result_block(tool_use_id, f"[blocked by PreToolUse hook: {tool_name}]")
 
         # hook 可修改 input
         if "modified_payload" in hook_result:
@@ -506,8 +592,7 @@ class AgenticLoop(EngineSkeleton):
         if permission == "deny":
             state.record(event="permission_denied", tool=tool_name)
             return _tool_result_block(
-                tool_use_id,
-                f"[permission denied: {tool_name} not allowed in {self.mode} mode]"
+                tool_use_id, f"[permission denied: {tool_name} not allowed in {self.mode} mode]"
             )
 
         if permission == "ask":
@@ -525,9 +610,7 @@ class AgenticLoop(EngineSkeleton):
         tool_spec = self._find_tool(tool_name)
         if tool_spec is None:
             state.record(event="tool_not_found", tool=tool_name)
-            return _tool_result_block(
-                tool_use_id, f"[tool not found: {tool_name}]"
-            )
+            return _tool_result_block(tool_use_id, f"[tool not found: {tool_name}]")
 
         # ── 执行工具 ──────────────────────────────────────────────────────
         try:
@@ -543,21 +626,17 @@ class AgenticLoop(EngineSkeleton):
                     state.todos = tracker(state.todos, tool_input)
 
             result_str = json.dumps(result) if isinstance(result, dict) else str(result)
-            state.record(event="tool_result", tool=tool_name,
-                         result_preview=result_str[:200])
+            state.record(event="tool_result", tool=tool_name, result_preview=result_str[:200])
 
         except Exception as exc:
             result_str = f"[tool error: {exc}]"
             state.record(event="tool_error", tool=tool_name, error=str(exc))
 
         # ── PostToolUse hook ──────────────────────────────────────────────
-        await self._hook(
-            "PostToolUse", {"tool": tool_name, "result": result_str[:500]}
-        )
+        await self._hook("PostToolUse", {"tool": tool_name, "result": result_str[:500]})
 
         if on_step:
-            on_step({"event": "tool_result", "tool": tool_name,
-                     "result_preview": result_str[:120]})
+            on_step({"event": "tool_result", "tool": tool_name, "result_preview": result_str[:120]})
 
         return _tool_result_block(tool_use_id, result_str)
 
@@ -580,23 +659,28 @@ class AgenticLoop(EngineSkeleton):
         if compactor is None:
             # 简单截断：保留最近 20 条
             kept = messages[-20:]
-            state.record(event="context_truncated",
-                         before=len(messages), after=len(kept))
+            state.record(event="context_truncated", before=len(messages), after=len(kept))
             if on_step:
-                on_step({"event": "context_compacted", "strategy": "truncate",
-                         "before": len(messages), "after": len(kept)})
+                on_step(
+                    {
+                        "event": "context_compacted",
+                        "strategy": "truncate",
+                        "before": len(messages),
+                        "after": len(kept),
+                    }
+                )
             return kept
 
         # compactor 是 omodul：(config, input, output_dir) -> dict
         # 此处简化调用（生产版用真实 compact_conversation omodul）
         try:
             from types import SimpleNamespace
+
             compact_input = SimpleNamespace(messages=messages)
             compact_config = SimpleNamespace()
             result = compactor(compact_config, compact_input, self.output_dir)
             compacted = result.get("messages", messages[-20:])
-            state.record(event="context_compacted",
-                         before=len(messages), after=len(compacted))
+            state.record(event="context_compacted", before=len(messages), after=len(compacted))
             return compacted
         except Exception:
             return messages[-20:]
@@ -626,6 +710,7 @@ register_skeleton("agentic_loop", AgenticLoop)
 # 辅助函数
 # ---------------------------------------------------------------------------
 
+
 async def _noop_hook(event: str, payload: dict) -> dict:
     return {"decision": "allow", "modified_payload": payload}
 
@@ -647,7 +732,9 @@ def _build_system(
     parts = [base] if base else ["You are hicode, an expert AI coding agent."]
     parts.append(f"Mode: {mode.upper()}.")
     if mode == "plan":
-        parts.append("In PLAN mode: analyze and propose changes only. Do NOT write files or run commands.")
+        parts.append(
+            "In PLAN mode: analyze and propose changes only. Do NOT write files or run commands."
+        )
     if extra_context:
         parts.append(f"\n## Skills\n{extra_context}")
     return "\n\n".join(parts)

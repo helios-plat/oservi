@@ -125,3 +125,12 @@ from oservi.trigger_register import (  # noqa: E402
     TriggerRegistry,
     trigger_register,
 )
+
+# 长程编码任务驱动 (事件溯源 + 投影状态机 + 配额治理装配)
+from oservi.long_task_driver import (  # noqa: E402
+    LongTaskDriver,
+    LongTaskError,
+    RoundContext,
+    RoundOutcome,
+    open_long_task,
+)
