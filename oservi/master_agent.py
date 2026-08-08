@@ -723,6 +723,18 @@ class MasterAgent:
 
             # 2. Model answers directly (no tool calls) -> done
             if not tool_calls:
+                # 收尾兜底: 模型在工具执行后返回 'None'/空 (opencode 免费池多轮
+                # 疲劳) → 输出工具执行摘要而非静默空, 用户至少看到真实进度。
+                if not content.strip() or content.strip().lower() in ("none", "null"):
+                    if tool_trace:
+                        done = [t.get("tool", "") for t in tool_trace]
+                        content = (
+                            "本轮已完成工具执行: " + ", ".join(done)
+                            + "; 但收尾总结生成失败 (模型返回无效响应), "
+                            "以上为实际执行结果。"
+                        )
+                    else:
+                        content = "模型未能生成有效回答 (返回无效响应), 请重试或换种说法。"
                 self.notify({"type": "master_done", "session_id": sid, "round": round_count})
                 return {
                     "status": "success",

@@ -225,3 +225,25 @@ async def test_hook_error_returns_failed():
     assert result["status"] == "failed"
     assert "long task hook error" in result["error"]
     assert not llm.calls
+
+
+async def test_final_none_after_tools_yields_summary():
+    """工具执行后收尾轮返回 'None' → final 输出工具执行摘要 (不静默空)。
+
+    回归: opencode 免费池多轮疲劳返回 'None' → 用户看到"不回复"。
+    """
+    llm = RecordingLLM([_tool_call_response(), _direct_response("None")])
+    agent = _make_agent(llm)
+    result = await agent.chat_stream("做视频", session_id="s2")
+    assert result["status"] == "success"
+    assert "已完成工具执行" in result["final_answer"]
+    assert result["tool_calls"]
+
+
+async def test_final_empty_no_tools_gives_hint():
+    """无工具执行且模型返回空 → 明确提示而非静默。"""
+    llm = RecordingLLM([_direct_response("")])
+    agent = _make_agent(llm)
+    result = await agent.chat_stream("hi", session_id="s3")
+    assert result["status"] == "success"
+    assert "无效响应" in result["final_answer"]
