@@ -837,7 +837,11 @@ class MasterAgent:
         llm_kwargs = kwargs.pop("llm_kwargs", None)
         if llm_kwargs:
             call_kwargs.update(llm_kwargs)
-        response = await self._llm_caller([{"role": "user", "content": user_prompt}], **call_kwargs)
+        # 轻量单轮同样注入主脑 system prompt — 否则模型自报本体人格
+        # (如 "我是 DeepSeek"), veya 身份/能力上下文完全丢失。
+        messages = [{"role": "system", "content": self.get_system_prompt()},
+                    {"role": "user", "content": user_prompt}]
+        response = await self._llm_caller(messages, **call_kwargs)
         content = ((response.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         return {"status": "success", "final_answer": content, "tool_calls": []}
 
