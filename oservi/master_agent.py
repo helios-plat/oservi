@@ -833,6 +833,21 @@ class MasterAgent:
                 "cost_usd": round(total_cost, 6),
                 "session_id": sid,
             }
+        # 轮次用尽但执行过工具: 输出工具执行摘要 (不静默 failed) — 用户
+        # 至少看到真实进度, 而非空白失败。与收尾轮 'None' 兜底同一语义。
+        if tool_trace:
+            done = [t.get("tool", "") for t in tool_trace]
+            return {
+                "status": "success",
+                "final_answer": (
+                    "轮次预算已用尽, 已执行 " + str(len(done)) + " 项工具: "
+                    + ", ".join(done) + "; 任务仍在进行中 (模型未在轮次内收尾)。"
+                ),
+                "rounds": round_count,
+                "tool_calls": tool_trace,
+                "cost_usd": round(total_cost, 6),
+                "session_id": sid,
+            }
         return {
             "status": "failed",
             "error": "模型未在预算内产出回答 (LLM 未返回内容)。",
