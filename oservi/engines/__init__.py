@@ -39,6 +39,10 @@ from oservi.engines import bulk_import_worker as _bulk_import_worker  # noqa: F4
 from oservi.engines import bulk_export_worker as _bulk_export_worker  # noqa: F401
 from oservi.engines import voice_agent as _voice_agent  # noqa: F401
 from oservi.engines import vision_agent as _vision_agent  # noqa: F401
+from oservi.engines import resilient_agentic_loop as _resilient_agentic_loop  # noqa: F401
+from oservi.engines import veya_evolution as _veya_evolution  # noqa: F401
+from oservi.engines import spec_driven_goal as _spec_driven_goal  # noqa: F401
+from oservi.engines import boss_orchestration as _boss_orchestration  # noqa: F401
 
 from oservi.engines.alerter import AlerterEngine
 from oservi.engines.researcher import ResearcherEngine
@@ -54,6 +58,10 @@ from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
 from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
 from oservi.engines.voice_agent import VoiceAgentEngine
 from oservi.engines.vision_agent import VisionAgentEngine
+from oservi.engines.resilient_agentic_loop import ResilientAgenticLoop
+from oservi.engines.veya_evolution import VeyaEvolutionEngine
+from oservi.engines.spec_driven_goal import SpecDrivenGoalEngine
+from oservi.engines.boss_orchestration import BossOrchestrationEngine
 
 __all__ = [
     "EngineSkeleton",
@@ -75,4 +83,8 @@ __all__ = [
     "BulkExportWorkerEngine",
     "VoiceAgentEngine",
     "VisionAgentEngine",
+    "ResilientAgenticLoop",
+    "VeyaEvolutionEngine",
+    "SpecDrivenGoalEngine",
+    "BossOrchestrationEngine",
 ]

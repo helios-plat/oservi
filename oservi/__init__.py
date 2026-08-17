@@ -26,6 +26,10 @@ from oservi.engines._base import (
 )
 from oservi.engines.action_planner import ActionPlannerEngine
 from oservi.engines.agentic_loop import AgenticLoopEngine
+from oservi.engines.resilient_agentic_loop import ResilientAgenticLoop
+from oservi.engines.veya_evolution import VeyaEvolutionEngine
+from oservi.engines.spec_driven_goal import SpecDrivenGoalEngine
+from oservi.engines.boss_orchestration import BossOrchestrationEngine
 
 # 引擎 (触发注册到 registry)
 from oservi.engines.alerter import AlerterEngine
@@ -78,6 +82,10 @@ __all__ = [
     "FeedTrackerEngine",
     "TriageEngine",
     "AgenticLoopEngine",
+    "ResilientAgenticLoop",
+    "VeyaEvolutionEngine",
+    "SpecDrivenGoalEngine",
+    "BossOrchestrationEngine",
     "ActionPlannerEngine",
     "AppInstallerEngine",
     "SequentialComposerEngine",
