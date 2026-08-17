@@ -13,6 +13,7 @@ injected ``llm_caller``. No main-library dependency on the host.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -34,6 +35,10 @@ class ToolRegistryProtocol(Protocol):
     def describe(self, name: str) -> str: ...
     def has(self, name: str) -> bool: ...
     async def execute(self, name: str, kwargs: dict) -> str: ...
+    # Optional (host may omit): declares a tool as pure read-only / no side
+    # effects, so a batch of such calls in one turn can run concurrently.
+    # Callers must probe defensively (getattr) — absent ⇒ treat as unsafe.
+    def is_parallel_safe(self, name: str) -> bool: ...
 
 
 class SkillHubProtocol(Protocol):
@@ -239,6 +244,7 @@ class MasterAgent:
         max_rounds: int = 32,
         temperature: float = 0.2,
         cost_calculator: Callable[[dict], float] | None = None,
+        sync_runner: Callable | None = None,
     ):
         """
         Args:
@@ -255,6 +261,7 @@ class MasterAgent:
             omni_gateway: Omni-channel distribution gateway (schema + dispatch).
             notify: Event callback (host bridges to SSE/fire_step); None = silent.
             system_prompt: Override the built-in SOP.
+            sync_runner: Optional async host adapter for blocking callables.
         """
         self._llm_caller = llm_caller
         self.tools = tools
@@ -273,6 +280,7 @@ class MasterAgent:
         self.temperature = temperature
         # Host-injected cost estimator (usage dict -> USD); default 0
         self._cost_calculator = cost_calculator
+        self._sync_runner = sync_runner
         # Vault physical tool callbacks: tool_name -> async (**intent, _injected_secret=...)
         self._vault_tool_callbacks: dict[str, Callable] = {}
         # 连续对话历史 (session_id -> messages, 进程内 LRU; 首条恒为 system)
@@ -538,6 +546,12 @@ class MasterAgent:
             + self.skill_hub.get_all_schemas()
         )
 
+    async def _call_sync(self, callback: Callable, /, *args: Any, **kwargs: Any) -> Any:
+        """Run a blocking system callback through the host adapter when available."""
+        if self._sync_runner is None:
+            return callback(*args, **kwargs)
+        return await self._sync_runner(callback, *args, **kwargs)
+
     def register_secure_tool(self, tool_name: str, callback: Callable) -> None:
         """Register a physical tool that needs secret injection (host wiring).
 
@@ -548,22 +562,22 @@ class MasterAgent:
     async def handle_tool_call(self, tool_name: str, tool_args: dict) -> str:
         """Tool routing: system-level intercept -> static tools -> dynamic skills."""
         if tool_name == "system_reload_skills":
-            stats = self.skill_hub.reload_skills()
+            stats = await self._call_sync(self.skill_hub.reload_skills)
             return (
                 f"System skills reloaded successfully. Now tracking "
                 f"{len(self.skill_hub.get_all_schemas())} dynamic skills "
                 f"(loaded={stats['loaded']}, skipped={stats['skipped']})."
             )
         if tool_name == "system_save_preference":
-            return self.memory.add_preference(**tool_args)
+            return await self._call_sync(self.memory.add_preference, **tool_args)
         if tool_name == "system_remove_preference":
-            return self.memory.remove_preference(**tool_args)
+            return await self._call_sync(self.memory.remove_preference, **tool_args)
         if tool_name == "system_create_automation":
-            return self.automata.register_cron_task(**tool_args)
+            return await self._call_sync(self.automata.register_cron_task, **tool_args)
         if tool_name == "system_remove_automation":
-            return self.automata.remove_task(**tool_args)
+            return await self._call_sync(self.automata.remove_task, **tool_args)
         if tool_name == "system_list_automations":
-            jobs = self.automata.get_jobs()
+            jobs = await self._call_sync(self.automata.get_jobs)
             if not jobs:
                 return "当前没有后台自动化任务。"
             return "\n".join(f"- {j['id']} | next: {j['next_run']}" for j in jobs)
@@ -572,9 +586,9 @@ class MasterAgent:
             result = await self.swarm.run_swarm(**tool_args)
             return f"Swarm Synthesis Complete:\n{result}"
         if tool_name == "system_workspace_search":
-            return self.rag.search_context(**tool_args)
+            return await self._call_sync(self.rag.search_context, **tool_args)
         if tool_name == "system_workspace_reindex":
-            return self.rag.reindex_workspace(force=True)
+            return await self._call_sync(self.rag.reindex_workspace, force=True)
         if tool_name == "system_secure_exec":
             physical = tool_args.pop("tool_name")
             vault_id = tool_args.pop("required_vault_id")
@@ -599,6 +613,62 @@ class MasterAgent:
         if self.tools.has(tool_name):
             return await self.tools.execute(tool_name, tool_args)
         return await self.skill_hub.execute(tool_name, tool_args)
+
+    async def _execute_tool_call(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        tc_id: str,
+        parse_error: str,
+        sid: str,
+        round_count: int,
+    ) -> tuple[dict, dict]:
+        """Run one tool call and return (trace_entry, tool_message) without
+        touching shared state — so the caller can gather a batch concurrently
+        and append results in a deterministic order. Emits tool_call / tool_error
+        events, and feeds failures back to the model verbatim (same as before)."""
+        self.notify(
+            {
+                "type": "tool_call",
+                "session_id": sid,
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+                "round": round_count,
+            }
+        )
+        try:
+            if parse_error:
+                raise ValueError(parse_error)
+            result = await self.handle_tool_call(tool_name, tool_args)
+            trace_entry = {"tool": tool_name, "status": "success"}
+            tool_message = {
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": f"[Tool {tool_name} SUCCESS]\nResult:\n{_truncate(result)}",
+            }
+            return trace_entry, tool_message
+        except Exception as exc:  # noqa: BLE001 — tool failure feeds reflection, not the user
+            _log.warning("[Master %s] tool %s failed: %s", sid, tool_name, exc)
+            self.notify(
+                {
+                    "type": "tool_error",
+                    "session_id": sid,
+                    "tool_name": tool_name,
+                    "error": str(exc),
+                    "round": round_count,
+                }
+            )
+            trace_entry = {"tool": tool_name, "status": "failed", "error": str(exc)}
+            # Failure fed back -> model reflects and retries differently
+            tool_message = {
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": (
+                    f"[Tool {tool_name} FAILED]\nError:\n{exc!s}\n\n"
+                    f"请仔细分析上述报错, 思考哪里出了问题, 并尝试另一种方法。"
+                ),
+            }
+            return trace_entry, tool_message
 
     # ── 无缝组装 (ReAct 循环) ───────────────────────────────────────
     async def chat_stream(
@@ -730,7 +800,8 @@ class MasterAgent:
                     if tool_trace:
                         done = [t.get("tool", "") for t in tool_trace]
                         content = (
-                            "本轮已完成工具执行: " + ", ".join(done)
+                            "本轮已完成工具执行: "
+                            + ", ".join(done)
                             + "; 但收尾总结生成失败 (模型返回无效响应), "
                             "以上为实际执行结果。"
                         )
@@ -746,61 +817,62 @@ class MasterAgent:
                     "session_id": sid,
                 }
 
-            # 3. Intercept and execute the real physical functions, feed back
+            # 3. Intercept and execute the real physical functions, feed back.
+            #    A turn may carry several tool_calls. When every call in the
+            #    batch is declared parallel-safe (pure read-only, no side
+            #    effects) they run concurrently; otherwise the whole batch runs
+            #    sequentially — a single side-effecting call forces serial order,
+            #    so writes never race reads that inform them. Result messages are
+            #    always appended in the model's original call order, regardless
+            #    of which lane ran them (order is invisible to the model).
+            specs: list[tuple[str, dict, str, str]] = []
             for tool_call in tool_calls:
                 fn = tool_call.get("function") or {}
                 tool_name = fn.get("name", "")
                 raw_args = fn.get("arguments") or "{}"
+                parse_error = ""
                 if isinstance(raw_args, str):
                     try:
                         tool_args = json.loads(raw_args)
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as exc:
                         tool_args = {}
+                        parse_error = f"malformed JSON arguments: {exc.msg}"
                 else:
                     tool_args = raw_args
+                if not isinstance(tool_args, dict):
+                    parse_error = "tool arguments must decode to a JSON object"
+                    tool_args = {}
                 tc_id = tool_call.get("id", f"call_{tool_name}")
-                self.notify(
-                    {
-                        "type": "tool_call",
-                        "session_id": sid,
-                        "tool_name": tool_name,
-                        "tool_args": tool_args,
-                        "round": round_count,
-                    }
+                specs.append((tool_name, tool_args, tc_id, parse_error))
+
+            _parallel_check = getattr(self.tools, "is_parallel_safe", None)
+
+            def _batch_parallel_safe() -> bool:
+                # Only when 2+ calls and every one is a registered, error-free,
+                # parallel-safe tool. Absent probe / any miss ⇒ sequential.
+                if len(specs) < 2 or _parallel_check is None:
+                    return False
+                return all(
+                    not spec_parse_err and bool(_parallel_check(spec_name))
+                    for spec_name, _spec_args, _spec_tc, spec_parse_err in specs
                 )
-                try:
-                    result = await self.handle_tool_call(tool_name, tool_args)
-                    tool_trace.append({"tool": tool_name, "status": "success"})
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc_id,
-                            "content": f"[Tool {tool_name} SUCCESS]\nResult:\n{_truncate(result)}",
-                        }
+
+            if _batch_parallel_safe():
+                results = await asyncio.gather(
+                    *(
+                        self._execute_tool_call(name, args, tc, err, sid, round_count)
+                        for name, args, tc, err in specs
                     )
-                except Exception as exc:  # noqa: BLE001 — tool failure feeds reflection, not the user
-                    tool_trace.append({"tool": tool_name, "status": "failed", "error": str(exc)})
-                    _log.warning("[Master %s] tool %s failed: %s", sid, tool_name, exc)
-                    self.notify(
-                        {
-                            "type": "tool_error",
-                            "session_id": sid,
-                            "tool_name": tool_name,
-                            "error": str(exc),
-                            "round": round_count,
-                        }
-                    )
-                    # 4. Failure fed back -> model reflects and retries differently
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc_id,
-                            "content": (
-                                f"[Tool {tool_name} FAILED]\nError:\n{exc!s}\n\n"
-                                f"请仔细分析上述报错, 思考哪里出了问题, 并尝试另一种方法。"
-                            ),
-                        }
-                    )
+                )
+            else:
+                results = [
+                    await self._execute_tool_call(name, args, tc, err, sid, round_count)
+                    for name, args, tc, err in specs
+                ]
+
+            for trace_entry, tool_message in results:
+                tool_trace.append(trace_entry)
+                messages.append(tool_message)
 
             # ── 长程任务: 每轮工具执行后写 todo/evidence/配额 (可选钩子) ──
             if long_task is not None:
@@ -841,8 +913,11 @@ class MasterAgent:
             return {
                 "status": "success",
                 "final_answer": (
-                    "轮次预算已用尽, 已执行 " + str(len(done)) + " 项工具: "
-                    + ", ".join(done) + "; 任务仍在进行中 (模型未在轮次内收尾)。"
+                    "轮次预算已用尽, 已执行 "
+                    + str(len(done))
+                    + " 项工具: "
+                    + ", ".join(done)
+                    + "; 任务仍在进行中 (模型未在轮次内收尾)。"
                 ),
                 "rounds": round_count,
                 "tool_calls": tool_trace,
@@ -867,8 +942,10 @@ class MasterAgent:
             call_kwargs.update(llm_kwargs)
         # 轻量单轮同样注入主脑 system prompt — 否则模型自报本体人格
         # (如 "我是 DeepSeek"), veya 身份/能力上下文完全丢失。
-        messages = [{"role": "system", "content": self.get_system_prompt()},
-                    {"role": "user", "content": user_prompt}]
+        messages = [
+            {"role": "system", "content": self.get_system_prompt()},
+            {"role": "user", "content": user_prompt},
+        ]
         response = await self._llm_caller(messages, **call_kwargs)
         content = ((response.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         return {"status": "success", "final_answer": content, "tool_calls": []}
