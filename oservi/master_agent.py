@@ -640,6 +640,27 @@ class MasterAgent:
             if parse_error:
                 raise ValueError(parse_error)
             result = await self.handle_tool_call(tool_name, tool_args)
+            # 画图工具: 校验通过后把模型已经写好的参数直接透传给前端渲染, 不等
+            # 模型把 XML 转述回最终文本 (省 token, 避免 _to_str 截断切断长 XML)。
+            # 只发已知模型参数字段的原样值 —— 不做任何 drawio 专属加工/包装,
+            # 保持 oservi 主库对宿主/兄弟 3O 模块 (oskill) 零依赖。
+            if tool_name == "display_diagram":
+                self.notify(
+                    {
+                        "type": "diagram_result",
+                        "session_id": sid,
+                        "xml": tool_args.get("xml", ""),
+                        "title": tool_args.get("title") or "Diagram",
+                    }
+                )
+            elif tool_name == "edit_diagram":
+                self.notify(
+                    {
+                        "type": "diagram_edit",
+                        "session_id": sid,
+                        "operations": tool_args.get("operations", []),
+                    }
+                )
             trace_entry = {"tool": tool_name, "status": "success"}
             tool_message = {
                 "role": "tool",
