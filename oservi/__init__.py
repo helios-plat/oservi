@@ -41,6 +41,7 @@ from oservi.engines.event_webhook_dispatcher import EventWebhookDispatcherEngine
 from oservi.engines.feed_tracker import FeedTrackerEngine
 from oservi.engines.mcp_bridge import McpBridgeEngine
 from oservi.engines.action_gateway import ActionGatewayEngine
+from oservi.engines.computer_supervisor import ComputerSupervisorEngine
 from oservi.engines.researcher import ResearcherEngine
 from oservi.engines.saga_composer import SagaComposerEngine
 from oservi.engines.sequential_composer import SequentialComposerEngine
@@ -93,6 +94,7 @@ __all__ = [
     "SubagentOrchestratorEngine",
     "McpBridgeEngine",
     "ActionGatewayEngine",
+    "ComputerSupervisorEngine",
     "SagaComposerEngine",
     "StateMachineEngine",
     "EventWebhookDispatcherEngine",
