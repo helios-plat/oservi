@@ -44,6 +44,8 @@ from oservi.engines import veya_evolution as _veya_evolution  # noqa: F401
 from oservi.engines import spec_driven_goal as _spec_driven_goal  # noqa: F401
 from oservi.engines import boss_orchestration as _boss_orchestration  # noqa: F401
 from oservi.engines import provider_router as _provider_router  # noqa: F401
+from oservi.engines import tool_governance as _tool_governance  # noqa: F401
+from oservi.engines import mcp_registry as _mcp_registry  # noqa: F401
 
 from oservi.engines.alerter import AlerterEngine
 from oservi.engines.researcher import ResearcherEngine
@@ -64,6 +66,8 @@ from oservi.engines.veya_evolution import VeyaEvolutionEngine
 from oservi.engines.spec_driven_goal import SpecDrivenGoalEngine
 from oservi.engines.boss_orchestration import BossOrchestrationEngine
 from oservi.engines.provider_router import ProviderRouterEngine
+from oservi.engines.tool_governance import ToolGovernanceEngine
+from oservi.engines.mcp_registry import MCPRegistryEngine
 
 __all__ = [
     "EngineSkeleton",
@@ -90,4 +94,6 @@ __all__ = [
     "SpecDrivenGoalEngine",
     "BossOrchestrationEngine",
     "ProviderRouterEngine",
+    "ToolGovernanceEngine",
+    "MCPRegistryEngine",
 ]

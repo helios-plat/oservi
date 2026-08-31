@@ -31,6 +31,8 @@ from oservi.engines.veya_evolution import VeyaEvolutionEngine
 from oservi.engines.spec_driven_goal import SpecDrivenGoalEngine
 from oservi.engines.boss_orchestration import BossOrchestrationEngine
 from oservi.engines.provider_router import ProviderRouterEngine
+from oservi.engines.tool_governance import ToolGovernanceEngine
+from oservi.engines.mcp_registry import MCPRegistryEngine
 
 # 引擎 (触发注册到 registry)
 from oservi.engines.alerter import AlerterEngine
@@ -99,6 +101,8 @@ __all__ = [
     "ComputerSupervisorEngine",
     "BrowserComputerEngine",
     "ProviderRouterEngine",
+    "ToolGovernanceEngine",
+    "MCPRegistryEngine",
     "SagaComposerEngine",
     "StateMachineEngine",
     "EventWebhookDispatcherEngine",
