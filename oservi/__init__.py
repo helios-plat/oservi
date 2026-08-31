@@ -30,6 +30,7 @@ from oservi.engines.resilient_agentic_loop import ResilientAgenticLoop
 from oservi.engines.veya_evolution import VeyaEvolutionEngine
 from oservi.engines.spec_driven_goal import SpecDrivenGoalEngine
 from oservi.engines.boss_orchestration import BossOrchestrationEngine
+from oservi.engines.provider_router import ProviderRouterEngine
 
 # 引擎 (触发注册到 registry)
 from oservi.engines.alerter import AlerterEngine
@@ -97,6 +98,7 @@ __all__ = [
     "ActionGatewayEngine",
     "ComputerSupervisorEngine",
     "BrowserComputerEngine",
+    "ProviderRouterEngine",
     "SagaComposerEngine",
     "StateMachineEngine",
     "EventWebhookDispatcherEngine",
