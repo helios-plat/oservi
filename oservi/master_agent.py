@@ -908,12 +908,16 @@ class MasterAgent:
             # preserves the legacy loop exactly.
             if self._post_tool_result_decider is not None:
                 for spec, (trace_entry, tool_message) in zip(specs, results, strict=True):
-                    if trace_entry.get("status") != "success":
-                        continue
                     decision = self._post_tool_result_decider(
                         {"tool": spec[0], "args": spec[1], "tool_call_id": spec[2]},
                         str(tool_message.get("content") or ""),
-                        {"round": round_count, "tool_trace": list(tool_trace)},
+                        {
+                            "round": round_count,
+                            "tool_trace": list(tool_trace),
+                            "status": trace_entry.get("status"),
+                            "executed": trace_entry.get("executed"),
+                            "error": trace_entry.get("error"),
+                        },
                     )
                     if hasattr(decision, "__await__"):
                         decision = await decision
