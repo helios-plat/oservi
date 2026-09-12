@@ -267,8 +267,8 @@ class MasterAgent:
             system_prompt: Override the built-in SOP.
             sync_runner: Optional async host adapter for blocking callables.
             post_tool_result_decider: Optional host callback returning ``STOP``
-                or ``CONTINUE`` after a successful tool result. The callback
-                may identify a candidate boundary, but cannot assert acceptance.
+                or ``CONTINUE`` after each tool result. The callback may
+                identify a candidate boundary, but cannot assert acceptance.
         """
         self._llm_caller = llm_caller
         self.tools = tools
