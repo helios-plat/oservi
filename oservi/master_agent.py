@@ -22,6 +22,8 @@ from typing import Any, Protocol
 
 _log = logging.getLogger(__name__)
 
+_NO_PROGRESS_LIMIT = 2
+
 # =========================================================================
 # 依赖协议(鸭子类型 — 宿主组件只需满足方法签名)
 # =========================================================================
@@ -227,6 +229,34 @@ def _truncate(text: str, limit: int = 40000) -> str:
     return text[:limit] + f"\n... [truncated {len(text) - limit} chars]"
 
 
+def _verified_tool_result(content: Any) -> bool:
+    """Return whether a tool supplied an explicit, structured verification pass.
+
+    The ReAct engine must not infer completion from prose such as ``done`` or
+    ``verified``.  CodingTaskResult already exposes ``acceptance_passed`` as a
+    durable fact, so only that field is trusted for the immediate verification
+    stop below.
+    """
+    if not isinstance(content, str):
+        return False
+    _marker, separator, payload = content.partition("Result:")
+    if not separator:
+        return False
+    try:
+        result = json.loads(payload.strip())
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return isinstance(result, dict) and result.get("acceptance_passed") is True
+
+
+def _action_key(tool_name: str, tool_args: dict) -> tuple[str, str]:
+    """Stable identity for detecting a repeated, non-progressing tool action."""
+    return (
+        tool_name,
+        json.dumps(tool_args, sort_keys=True, ensure_ascii=False, default=str),
+    )
+
+
 class MasterAgent:
     """Master Brain: intent routing + tool dispatch + final synthesis."""
 
@@ -248,6 +278,7 @@ class MasterAgent:
         temperature: float = 0.2,
         cost_calculator: Callable[[dict], float] | None = None,
         sync_runner: Callable | None = None,
+        llm_timeout_s: float | None = 120.0,
     ):
         """
         Args:
@@ -281,6 +312,11 @@ class MasterAgent:
         self.system_prompt = system_prompt or MASTER_SYSTEM_PROMPT
         self.max_rounds = max_rounds
         self.temperature = temperature
+        # The injected provider is part of the loop boundary.  A provider
+        # transport can otherwise outlive the task and make a tool result look
+        # like a stalled ReAct loop.  ``None`` retains the caller's unbounded
+        # behavior for hosts that explicitly opt out.
+        self.llm_timeout_s = llm_timeout_s if llm_timeout_s and llm_timeout_s > 0 else None
         # Host-injected cost estimator (usage dict -> USD); default 0
         self._cost_calculator = cost_calculator
         self._sync_runner = sync_runner
@@ -730,6 +766,33 @@ class MasterAgent:
         round_count = 0
         total_cost = 0.0
         tool_trace: list[dict] = []
+        action_results: dict[tuple[str, str], str] = {}
+        result_fingerprints: set[tuple[str, str]] = set()
+        no_progress_rounds = 0
+
+        def stop_after_no_progress(reason: str) -> dict[str, Any]:
+            error = f"ReAct loop stopped after repeated no-progress responses: {reason}"
+            _log.error("[Master %s] %s", sid, error)
+            self.notify(
+                {
+                    "type": "master_error",
+                    "session_id": sid,
+                    "error": error,
+                    "round": round_count,
+                    "reason": "repeated_noop",
+                }
+            )
+            final_answer = f"⚠ {error}"
+            messages.append({"role": "assistant", "content": final_answer})
+            return {
+                "status": "failed",
+                "error": error,
+                "final_answer": final_answer,
+                "rounds": round_count,
+                "tool_calls": tool_trace,
+                "cost_usd": round(total_cost, 6),
+                "session_id": sid,
+            }
 
         while round_count < max_rounds:
             round_count += 1
@@ -787,7 +850,31 @@ class MasterAgent:
             if llm_kwargs:
                 call_kwargs.update(llm_kwargs)
             try:
-                response = await self._llm_caller(messages, **call_kwargs)
+                llm_request = self._llm_caller(messages, **call_kwargs)
+                if self.llm_timeout_s is None:
+                    response = await llm_request
+                else:
+                    response = await asyncio.wait_for(llm_request, timeout=self.llm_timeout_s)
+            except asyncio.TimeoutError:
+                error = f"LLM call timed out after {self.llm_timeout_s:g}s"
+                _log.error("[Master %s] %s", sid, error)
+                self.notify(
+                    {
+                        "type": "master_error",
+                        "session_id": sid,
+                        "error": error,
+                        "round": round_count,
+                        "reason": "provider_timeout",
+                    }
+                )
+                return {
+                    "status": "failed",
+                    "error": error,
+                    "rounds": round_count,
+                    "tool_calls": tool_trace,
+                    "cost_usd": round(total_cost, 6),
+                    "session_id": sid,
+                }
             except Exception as exc:  # noqa: BLE001 — LLM 网络/鉴权失败: 明确返回而非循环
                 _log.error("[Master %s] LLM call failed: %s", sid, exc)
                 self.notify(
@@ -806,18 +893,77 @@ class MasterAgent:
                     "cost_usd": round(total_cost, 6),
                     "session_id": sid,
                 }
+            if not isinstance(response, dict):
+                response = {}
             total_cost += self._cost_of(response)
 
-            choice = (response.get("choices") or [{}])[0]
-            message = choice.get("message") or {}
+            choices = response.get("choices")
+            choice = choices[0] if isinstance(choices, list) and choices else {}
+            message = choice.get("message") if isinstance(choice, dict) else None
+            message = message or {}
+            if not isinstance(message, dict):
+                no_progress_rounds += 1
+                reason = "provider returned no assistant message"
+                self.notify(
+                    {
+                        "type": "master_replan",
+                        "session_id": sid,
+                        "round": round_count,
+                        "reason": reason,
+                    }
+                )
+                if no_progress_rounds >= _NO_PROGRESS_LIMIT:
+                    return stop_after_no_progress(reason)
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "Loop guard: the previous model response produced no action. "
+                            "Diagnose the current tool result and either call the next tool "
+                            "or return the final answer."
+                        ),
+                    }
+                )
+                continue
             content = message.get("content") or ""
             tool_calls = message.get("tool_calls") or []
+            if not isinstance(tool_calls, list):
+                tool_calls = []
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
             if len(messages) > self._history_max_msgs:
                 messages[:] = [messages[0]] + messages[-(self._history_max_msgs - 1) :]
 
             # 2. Model answers directly (no tool calls) -> done
             if not tool_calls:
+                # An empty response after a physical tool result is not a
+                # final answer. Ask the same model to diagnose/continue once;
+                # the second consecutive empty response is terminal. This
+                # closes the post-tool edge without selecting a replacement
+                # capability or tool in program code.
+                if not content.strip() and tool_trace:
+                    no_progress_rounds += 1
+                    reason = "empty assistant response after tool result"
+                    self.notify(
+                        {
+                            "type": "master_replan",
+                            "session_id": sid,
+                            "round": round_count,
+                            "reason": reason,
+                        }
+                    )
+                    if no_progress_rounds >= _NO_PROGRESS_LIMIT:
+                        return stop_after_no_progress(reason)
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Loop guard: the tool result is not yet summarized. "
+                                "Diagnose it and either take the next action or provide "
+                                "a concrete final answer; do not return an empty response."
+                            ),
+                        }
+                    )
+                    continue
                 # 收尾兜底: 模型在工具执行后返回 'None'/空 (opencode 免费池多轮
                 # 疲劳) → 输出工具执行摘要而非静默空, 用户至少看到真实进度。
                 if not content.strip() or content.strip().lower() in ("none", "null"):
@@ -869,34 +1015,154 @@ class MasterAgent:
                 tc_id = tool_call.get("id", f"call_{tool_name}")
                 specs.append((tool_name, tool_args, tc_id, parse_error))
 
+            # A model occasionally emits the exact action it has just
+            # completed again.  Re-executing it is not progress (and can
+            # duplicate a side effect), so feed back one explicit replan
+            # observation instead.  A second consecutive no-op is terminal;
+            # this is a guard, not a semantic route or a replacement action.
+            executable_specs: list[tuple[str, dict, str, str]] = []
+            pending_keys: set[tuple[str, str]] = set()
+            duplicate_specs: dict[int, tuple[str, dict, str, str]] = {}
+            duplicate_found = False
+            for index, spec in enumerate(specs):
+                spec_key = _action_key(spec[0], spec[1])
+                if spec_key in action_results or spec_key in pending_keys:
+                    duplicate_specs[index] = spec
+                    duplicate_found = True
+                else:
+                    pending_keys.add(spec_key)
+                    executable_specs.append(spec)
+
+            if duplicate_found:
+                no_progress_rounds += 1
+                repeated_tools = [spec[0] for spec in duplicate_specs.values()]
+                self.notify(
+                    {
+                        "type": "master_replan",
+                        "session_id": sid,
+                        "round": round_count,
+                        "tool_names": repeated_tools,
+                        "reason": "repeated tool action produced no new progress",
+                    }
+                )
+            if no_progress_rounds >= _NO_PROGRESS_LIMIT and not executable_specs:
+                repeated = ", ".join(sorted(set(spec[0] for spec in duplicate_specs.values())))
+                return stop_after_no_progress(f"repeated tool actions: {repeated}")
             _parallel_check = getattr(self.tools, "is_parallel_safe", None)
 
             def _batch_parallel_safe() -> bool:
                 # Only when 2+ calls and every one is a registered, error-free,
                 # parallel-safe tool. Absent probe / any miss ⇒ sequential.
-                if len(specs) < 2 or _parallel_check is None:
+                if len(executable_specs) < 2 or _parallel_check is None:
                     return False
                 return all(
                     not spec_parse_err and bool(_parallel_check(spec_name))
-                    for spec_name, _spec_args, _spec_tc, spec_parse_err in specs
+                    for spec_name, _spec_args, _spec_tc, spec_parse_err in executable_specs
                 )
 
             if _batch_parallel_safe():
-                results = await asyncio.gather(
+                executed_results = await asyncio.gather(
                     *(
                         self._execute_tool_call(name, args, tc, err, sid, round_count)
-                        for name, args, tc, err in specs
+                        for name, args, tc, err in executable_specs
                     )
                 )
             else:
-                results = [
+                executed_results = [
                     await self._execute_tool_call(name, args, tc, err, sid, round_count)
-                    for name, args, tc, err in specs
+                    for name, args, tc, err in executable_specs
                 ]
 
-            for trace_entry, tool_message in results:
+            executed_by_key = {
+                _action_key(spec[0], spec[1]): result
+                for spec, result in zip(executable_specs, executed_results, strict=True)
+            }
+            results: list[tuple[dict, dict]] = []
+            for index, spec in enumerate(specs):
+                if index in duplicate_specs:
+                    tool_name, tool_args, tc_id, _parse_error = duplicate_specs[index]
+                    reason = (
+                        f"the identical {tool_name} action already produced a result; "
+                        "choose a genuinely new step or provide the final answer"
+                    )
+                    results.append(
+                        (
+                            {"tool": tool_name, "status": "replan", "error": reason},
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": f"[Tool {tool_name} REPLAN_REQUIRED]\n{reason}",
+                            },
+                        )
+                    )
+                else:
+                    results.append(executed_by_key[_action_key(spec[0], spec[1])])
+
+            for spec, (trace_entry, tool_message) in zip(specs, results, strict=True):
                 tool_trace.append(trace_entry)
                 messages.append(tool_message)
+                if trace_entry.get("status") != "replan":
+                    action_results[_action_key(spec[0], spec[1])] = str(
+                        tool_message.get("content") or ""
+                    )
+
+            failed_tools = [
+                entry[0].get("tool", "")
+                for entry in results
+                if entry[0].get("status") == "failed"
+            ]
+            if failed_tools:
+                self.notify(
+                    {
+                        "type": "master_replan",
+                        "session_id": sid,
+                        "round": round_count,
+                        "tool_names": failed_tools,
+                        "reason": "tool failure requires diagnosis and a new action",
+                    }
+                )
+
+            # Different read ranges/limits can still return the same evidence.
+            # Treat a consecutive batch with no new result content as no
+            # progress, even when its JSON arguments differ. This is a loop
+            # guard only: the model still chooses the next action or final.
+            batch_has_new_result = False
+            for trace_entry, tool_message in results:
+                if trace_entry.get("status") == "replan":
+                    continue
+                fingerprint = (
+                    str(trace_entry.get("tool") or ""),
+                    str(tool_message.get("content") or ""),
+                )
+                if fingerprint not in result_fingerprints:
+                    batch_has_new_result = True
+                result_fingerprints.add(fingerprint)
+            if executable_specs:
+                if batch_has_new_result:
+                    no_progress_rounds = 0
+                else:
+                    no_progress_rounds += 1
+                    reason = "tool results repeated without new evidence"
+                    self.notify(
+                        {
+                            "type": "master_replan",
+                            "session_id": sid,
+                            "round": round_count,
+                            "reason": reason,
+                        }
+                    )
+                    if no_progress_rounds >= _NO_PROGRESS_LIMIT:
+                        return stop_after_no_progress(reason)
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Loop guard: the latest tool results add no new evidence. "
+                                "Diagnose the existing result and either choose a genuinely "
+                                "new action or provide the final answer."
+                            ),
+                        }
+                    )
 
             # ── 长程任务: 每轮工具执行后写 todo/evidence/配额 (可选钩子) ──
             if long_task is not None:
@@ -912,6 +1178,30 @@ class MasterAgent:
                         "cost_usd": round(total_cost, 6),
                         "session_id": sid,
                     }
+
+            # CodingTaskResult carries a durable acceptance fact.  Once the
+            # physical harness reports it, another model round cannot improve
+            # verification and may only turn a completed task into a timeout.
+            verified_messages = [
+                tool_message
+                for _trace_entry, tool_message in results
+                if _verified_tool_result(tool_message.get("content"))
+            ]
+            if verified_messages:
+                final_answer = (
+                    "验证已通过。以下为工具返回的实际结果：\n"
+                    + str(verified_messages[-1].get("content") or "")
+                )
+                messages.append({"role": "assistant", "content": final_answer})
+                self.notify({"type": "master_done", "session_id": sid, "round": round_count})
+                return {
+                    "status": "success",
+                    "final_answer": final_answer,
+                    "rounds": round_count,
+                    "tool_calls": tool_trace,
+                    "cost_usd": round(total_cost, 6),
+                    "session_id": sid,
+                }
 
         # 轮次护栏耗尽 (防物理死循环, 不限制智能): 返回模型最后产出, 不报 HITL。
         # 大模型全程自由调用工具/直答; 极端情况下预算用尽也把已有内容交还用户。
