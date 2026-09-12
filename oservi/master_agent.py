@@ -279,6 +279,7 @@ class MasterAgent:
         cost_calculator: Callable[[dict], float] | None = None,
         sync_runner: Callable | None = None,
         llm_timeout_s: float | None = 120.0,
+        post_tool_result_decider: Callable[[dict, str, dict], Any] | None = None,
     ):
         """
         Args:
@@ -296,6 +297,9 @@ class MasterAgent:
             notify: Event callback (host bridges to SSE/fire_step); None = silent.
             system_prompt: Override the built-in SOP.
             sync_runner: Optional async host adapter for blocking callables.
+            post_tool_result_decider: Optional host callback returning ``STOP``
+                or ``CONTINUE`` after each tool result. The callback may
+                identify a candidate boundary, but cannot assert acceptance.
         """
         self._llm_caller = llm_caller
         self.tools = tools
@@ -320,6 +324,7 @@ class MasterAgent:
         # Host-injected cost estimator (usage dict -> USD); default 0
         self._cost_calculator = cost_calculator
         self._sync_runner = sync_runner
+        self._post_tool_result_decider = post_tool_result_decider
         # Vault physical tool callbacks: tool_name -> async (**intent, _injected_secret=...)
         self._vault_tool_callbacks: dict[str, Callable] = {}
         # 连续对话历史 (session_id -> messages, 进程内 LRU; 首条恒为 system)
@@ -1163,6 +1168,38 @@ class MasterAgent:
                             ),
                         }
                     )
+
+            # Keep this hook generic and host-owned.  oservi does not import
+            # VerificationSpec, EvidenceBundle, or a verifier; an absent hook
+            # preserves the legacy loop exactly.
+            if self._post_tool_result_decider is not None:
+                for spec, (trace_entry, tool_message) in zip(specs, results, strict=True):
+                    decision = self._post_tool_result_decider(
+                        {"tool": spec[0], "args": spec[1], "tool_call_id": spec[2]},
+                        str(tool_message.get("content") or ""),
+                        {
+                            "round": round_count,
+                            "tool_trace": list(tool_trace),
+                            "status": trace_entry.get("status"),
+                            "executed": trace_entry.get("executed"),
+                            "error": trace_entry.get("error"),
+                        },
+                    )
+                    if hasattr(decision, "__await__"):
+                        decision = await decision
+                    if str(decision).upper() == "STOP":
+                        self.notify(
+                            {"type": "candidate.complete", "session_id": sid, "round": round_count}
+                        )
+                        return {
+                            "status": "candidate_ready",
+                            "candidate": True,
+                            "final_answer": str(tool_message.get("content") or ""),
+                            "rounds": round_count,
+                            "tool_calls": tool_trace,
+                            "cost_usd": round(total_cost, 6),
+                            "session_id": sid,
+                        }
 
             # ── 长程任务: 每轮工具执行后写 todo/evidence/配额 (可选钩子) ──
             if long_task is not None:

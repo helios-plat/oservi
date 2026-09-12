@@ -247,3 +247,44 @@ async def test_final_empty_no_tools_gives_hint():
     result = await agent.chat_stream("hi", session_id="s3")
     assert result["status"] == "success"
     assert "无效响应" in result["final_answer"]
+
+
+async def test_post_tool_result_stop_returns_candidate_without_acceptance():
+    """A host readiness hook stops before another model/tool turn."""
+    llm = RecordingLLM([_tool_call_response(), _direct_response("must not run")])
+    decisions = []
+
+    def decide(tool_call, result, loop_state):
+        decisions.append((tool_call, result, loop_state["round"]))
+        return "STOP"
+
+    agent = MasterAgent(
+        llm_caller=llm,
+        tools=FakeTools(),
+        skill_hub=FakeSkillHub(),
+        memory=FakeMemory(),
+        swarm=FakeSwarm(),
+        vault=FakeVault(),
+        post_tool_result_decider=decide,
+    )
+    result = await agent.chat_stream("run candidate", session_id="candidate-stop")
+    assert result["status"] == "candidate_ready"
+    assert result["candidate"] is True
+    assert len(llm.calls) == 1
+    assert decisions and decisions[0][0]["tool"] == "fake_tool"
+
+
+async def test_post_tool_result_continue_preserves_legacy_loop():
+    llm = RecordingLLM([_tool_call_response(), _direct_response("done")])
+    agent = MasterAgent(
+        llm_caller=llm,
+        tools=FakeTools(),
+        skill_hub=FakeSkillHub(),
+        memory=FakeMemory(),
+        swarm=FakeSwarm(),
+        vault=FakeVault(),
+        post_tool_result_decider=lambda *_args: "CONTINUE",
+    )
+    result = await agent.chat_stream("continue", session_id="candidate-continue")
+    assert result["status"] == "success"
+    assert len(llm.calls) == 2
