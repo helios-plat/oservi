@@ -781,13 +781,23 @@ class MasterAgent:
             messages = [{"role": "system", "content": self.get_system_prompt()}]
             self._histories[sid] = messages
         if prior_result is not None:
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": str(prior_result.get("action_id") or "canonical-action"),
-                    "content": json.dumps(prior_result, ensure_ascii=False, default=str),
-                }
-            )
+            prior_call_id = str(prior_result.get("action_id") or "canonical-action")
+            # ``observe_action_result`` normally placed this result in the
+            # same in-process semantic history.  On a resumed process the
+            # durable continuation is the only copy, so append it only when
+            # the history does not already contain that observation.
+            if not (
+                messages
+                and messages[-1].get("role") == "tool"
+                and messages[-1].get("tool_call_id") == prior_call_id
+            ):
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": prior_call_id,
+                        "content": json.dumps(prior_result, ensure_ascii=False, default=str),
+                    }
+                )
         elif not messages or messages[-1].get("role") != "user":
             messages.append({"role": "user", "content": user_prompt})
         response, cost = await self._semantic_model_call(messages, llm_kwargs=llm_kwargs)
