@@ -735,6 +735,108 @@ class MasterAgent:
             }
             return trace_entry, tool_message
 
+    async def _semantic_model_call(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        llm_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], float]:
+        """Run the single shared model-decision core.
+
+        This helper only asks the model for its next semantic decision.  It
+        never dispatches a tool, writes a ledger, or owns acceptance.
+        ``chat_stream`` and ``semantic_step`` both use this exact boundary.
+        """
+        call_kwargs: dict[str, Any] = {
+            "tools": self.get_all_tool_schemas(),
+            "temperature": self.temperature,
+            "max_tokens": 8192,
+        }
+        if llm_kwargs:
+            call_kwargs.update(llm_kwargs)
+        request = self._llm_caller(messages, **call_kwargs)
+        if self.llm_timeout_s is None:
+            response = await request
+        else:
+            response = await asyncio.wait_for(request, timeout=self.llm_timeout_s)
+        return (response if isinstance(response, dict) else {}), self._cost_of(response)
+
+    async def semantic_step(
+        self,
+        user_prompt: str,
+        *,
+        session_id: str,
+        llm_kwargs: dict[str, Any] | None = None,
+        prior_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return one model-selected semantic decision for a GoalRun.
+
+        The returned action is data only.  Physical execution is exclusively
+        performed by the caller's GoalRun executor; this method has no tool
+        dispatch or acceptance path.
+        """
+        sid = session_id
+        messages = self._histories.get(sid)
+        if messages is None:
+            messages = [{"role": "system", "content": self.get_system_prompt()}]
+            self._histories[sid] = messages
+        if prior_result is not None:
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": str(prior_result.get("action_id") or "canonical-action"),
+                    "content": json.dumps(prior_result, ensure_ascii=False, default=str),
+                }
+            )
+        elif not messages or messages[-1].get("role") != "user":
+            messages.append({"role": "user", "content": user_prompt})
+        response, cost = await self._semantic_model_call(messages, llm_kwargs=llm_kwargs)
+        choices = response.get("choices")
+        choice = choices[0] if isinstance(choices, list) and choices else {}
+        message = choice.get("message") if isinstance(choice, dict) else {}
+        message = message if isinstance(message, dict) else {}
+        content = str(message.get("content") or "")
+        tool_calls = message.get("tool_calls") or []
+        messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+        if len(messages) > self._history_max_msgs:
+            messages[:] = [messages[0]] + messages[-(self._history_max_msgs - 1) :]
+        if tool_calls:
+            call = tool_calls[0] if isinstance(tool_calls[0], dict) else {}
+            function = call.get("function") or {}
+            raw_args = function.get("arguments") or {}
+            try:
+                arguments = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            except json.JSONDecodeError:
+                arguments = {}
+            if not isinstance(arguments, dict):
+                arguments = {}
+            return {
+                "kind": "action",
+                "tool": str(function.get("name") or ""),
+                "arguments": arguments,
+                "action_id": str(call.get("id") or ""),
+                "cost": cost,
+            }
+        return {"kind": "candidate", "content": content, "cost": cost}
+
+    async def observe_action_result(
+        self,
+        result: dict[str, Any],
+        *,
+        session_id: str,
+    ) -> None:
+        """Record a GoalRun result for the next semantic step only."""
+        messages = self._histories.setdefault(
+            session_id, [{"role": "system", "content": self.get_system_prompt()}]
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": str(result.get("action_id") or "canonical-action"),
+                "content": json.dumps(result, ensure_ascii=False, default=str),
+            }
+        )
+
     # ── 无缝组装 (ReAct 循环) ───────────────────────────────────────
     async def chat_stream(
         self,
@@ -846,20 +948,11 @@ class MasterAgent:
                         "session_id": sid,
                     }
 
-            # 1. Feed the LLM the JSON schemas it can understand
-            call_kwargs = {
-                "tools": self.get_all_tool_schemas(),
-                "temperature": self.temperature,
-                "max_tokens": 8192,
-            }
-            if llm_kwargs:
-                call_kwargs.update(llm_kwargs)
             try:
-                llm_request = self._llm_caller(messages, **call_kwargs)
-                if self.llm_timeout_s is None:
-                    response = await llm_request
-                else:
-                    response = await asyncio.wait_for(llm_request, timeout=self.llm_timeout_s)
+                response, model_cost = await self._semantic_model_call(
+                    messages, llm_kwargs=llm_kwargs
+                )
+                total_cost += model_cost
             except asyncio.TimeoutError:
                 error = f"LLM call timed out after {self.llm_timeout_s:g}s"
                 _log.error("[Master %s] %s", sid, error)
@@ -900,8 +993,6 @@ class MasterAgent:
                 }
             if not isinstance(response, dict):
                 response = {}
-            total_cost += self._cost_of(response)
-
             choices = response.get("choices")
             choice = choices[0] if isinstance(choices, list) and choices else {}
             message = choice.get("message") if isinstance(choice, dict) else None
