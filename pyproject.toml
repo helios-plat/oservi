@@ -16,8 +16,8 @@ dependencies = [
     # 3O 四包依赖 — plain names; local editable installs take precedence
     "obase @ git+https://github.com/helios-plat/obase.git@d7bcf9abb7a5baef5003075ad2808dfc0b5e4cac",
     "oprim @ git+https://github.com/helios-plat/oprim.git@e7f9c65196437d3bff09401aa02bc817d071eec3",
-    "oskill @ git+https://github.com/helios-plat/oskill.git@7af95aff71ef5c358b277a1a68cd3a71459adecf",
-    "omodul @ git+https://github.com/helios-plat/omodul.git@a36597c56d30b7fc8914873c695683089e40a0b1",
+    "oskill @ git+https://github.com/helios-plat/oskill.git@2554f4a96941991bef80381a9b06aee0d99f30cb",
+    "omodul @ git+https://github.com/helios-plat/omodul.git@b0c59686bb217b2fba19d307b85e5273d5964307",
     "croniter>=2.0",
 ]
 
