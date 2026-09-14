@@ -14,10 +14,10 @@ keywords = ["3o", "service", "assembly", "engine", "helios-plat"]
 
 dependencies = [
     # 3O 四包依赖 — plain names; local editable installs take precedence
-    "obase @ git+https://github.com/helios-plat/obase.git@d7bcf9abb7a5baef5003075ad2808dfc0b5e4cac",
+    "obase @ git+https://github.com/helios-plat/obase.git@7d31719d8411b4fb34952ae4098ab320625d14dd",
     "oprim @ git+https://github.com/helios-plat/oprim.git@e7f9c65196437d3bff09401aa02bc817d071eec3",
-    "oskill @ git+https://github.com/helios-plat/oskill.git@2554f4a96941991bef80381a9b06aee0d99f30cb",
-    "omodul @ git+https://github.com/helios-plat/omodul.git@b0c59686bb217b2fba19d307b85e5273d5964307",
+    "oskill @ git+https://github.com/helios-plat/oskill.git@96588d5520fbad257f6a28ff311b0c491fbf945e",
+    "omodul @ git+https://github.com/helios-plat/omodul.git@5614fc5c6600e2b75d43d52a97721393b691eda6",
     "croniter>=2.0",
 ]
 
