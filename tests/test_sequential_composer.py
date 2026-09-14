@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
 
 from oservi import list_skeletons
 from oservi.engines.sequential_composer import SequentialComposerEngine
 
-
 # ===== Fake steps =====
+
 
 def step_add_key(*, input_data, step_no):
     return {**input_data, f"step_{step_no}": True}
@@ -24,18 +23,19 @@ def step_raises(*, input_data, step_no):
 
 
 def _make_engine(**overrides):
-    defaults = dict(
-        steps=[step_add_key],
-        router=None,
-        trigger={"on_demand": True},
-        config={},
-        name="test-composer",
-    )
+    defaults = {
+        "steps": [step_add_key],
+        "router": None,
+        "trigger": {"on_demand": True},
+        "config": {},
+        "name": "test-composer",
+    }
     defaults.update(overrides)
     return SequentialComposerEngine(**defaults)
 
 
 # ===== Tests =====
+
 
 def test_sequential_composer_registered():
     assert "sequential_composer" in list_skeletons()
@@ -138,7 +138,7 @@ def test_run_empty_input_data():
 
 
 def test_router_stored():
-    router = lambda: None  # noqa: E731
+    router = lambda: None
     engine = _make_engine(router=router)
     assert engine.router is router
 

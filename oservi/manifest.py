@@ -10,8 +10,9 @@ Manifest 是装配输入. assemble(manifest) 输出可 run 的 Service.
 无实证之前不上 K8s 级 DSL. 等 ≥2 项目需要 "几十个服务自动 reconcile" 再扩展.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Any, Literal
+from typing import Any, Literal
 
 TriggerMode = Literal["on_interval", "on_cron", "on_demand", "on_signal"]
 

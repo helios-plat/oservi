@@ -6,7 +6,7 @@ import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from obase.browser import BrowserProfile, BrowserSessionHandle
 from obase.computer import ComputerProfile
@@ -38,7 +38,7 @@ def _handle(value: Any) -> Mapping[str, Any] | None:
 class BrowserComputerEngine(EngineSkeleton):
     """On-demand browser lifecycle mechanism bound to an existing computer."""
 
-    injection_points: dict[str, Injection] = {  # noqa: RUF012
+    injection_points: ClassVar[dict] = {
         "computer_prepare": Injection(
             kind="layer4", cardinality="1", description="existing Computer Supervisor prepare"
         ),
@@ -180,7 +180,7 @@ class BrowserComputerEngine(EngineSkeleton):
             if isinstance(result, Mapping) and result.get("status") == "failed":
                 self._last_error = str(result.get("error"))
             return cast(dict[str, Any], result)
-        except Exception as exc:  # noqa: BLE001 - engine boundary fails closed
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             self._last_error = f"{type(exc).__name__}: {exc}"
             return {"ok": False, "status": "failed", "error": self._last_error}
 
@@ -214,7 +214,7 @@ class BrowserComputerEngine(EngineSkeleton):
             if isinstance(result, dict) and result.get("ok") is False:
                 self._last_error = str(result.get("error") or "browser operation failed")
             return cast(dict[str, Any], result)
-        except Exception as exc:  # noqa: BLE001 - engine boundary fails closed
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             self._last_error = f"{type(exc).__name__}: {exc}"
             return {"ok": False, "status": "failed", "error": self._last_error}
 

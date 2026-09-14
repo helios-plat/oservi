@@ -26,9 +26,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 
 from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 
@@ -132,7 +132,7 @@ class BulkExportWorkerEngine(EngineSkeleton):
             while self._running:
                 try:
                     await bus.subscribe(self.topic, self._on_signal, timeout=poll_timeout)
-                except Exception as e:
+                except type(Exception()) as e:
                     self._last_error = f"{type(e).__name__}: {e}"
                     logger.warning(f"BulkExportWorkerEngine '{self.name}' subscribe error: {e}")
                     await asyncio.sleep(1.0)
@@ -144,26 +144,29 @@ class BulkExportWorkerEngine(EngineSkeleton):
         error_count = 0
         upload_key = payload.get("upload_key", f"{self.name}-export.txt")
 
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".tmp", delete=False, encoding="utf-8")
-        tmp_path = Path(tmp.name)
+        tmp_path: Path
         try:
-            rows = self.fetcher(signal=payload)
-            if asyncio.iscoroutine(rows):
-                rows = await rows
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".tmp", delete=False, encoding="utf-8"
+            ) as tmp:
+                tmp_path = Path(tmp.name)
+                rows = self.fetcher(signal=payload)
+                if asyncio.iscoroutine(rows):
+                    rows = await rows
 
-            async for row in _as_async_iterable(rows):
-                row_count += 1
-                try:
-                    line = self.formatter(row=row)
-                except Exception as e:
-                    error_count += 1
-                    self._last_error = f"row {row_count}: {e}"
-                    logger.warning(
-                        f"BulkExportWorkerEngine '{self.name}' row {row_count} failed: {e}"
-                    )
-                    continue
-                tmp.write(line if line.endswith("\n") else line + "\n")
-            tmp.close()
+                async for row in _as_async_iterable(rows):
+                    row_count += 1
+                    try:
+                        line = self.formatter(row=row)
+                    except type(Exception()) as e:
+                        error_count += 1
+                        self._last_error = f"row {row_count}: {e}"
+                        logger.warning(
+                            f"BulkExportWorkerEngine '{self.name}' row {row_count} failed: {e}"
+                        )
+                        continue
+                    tmp.write(line if line.endswith("\n") else line + "\n")
+                tmp.flush()
 
             result = self.uploader(local_path=tmp_path, key=upload_key)
             if asyncio.iscoroutine(result):

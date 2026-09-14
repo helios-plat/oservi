@@ -23,7 +23,7 @@ class BenchTask:
 
     repo: str
     prompt: str
-    gold_patch: str          # 期望改动 (文本; 比对用相似度)
+    gold_patch: str  # 期望改动 (文本; 比对用相似度)
     id: str = ""
 
 
@@ -87,8 +87,11 @@ def agent_bench_harness(
         # 确定性: 工具调用回显 mock 响应 + 输出 = gold_patch 截断 (可复现)
         tool_calls = ctx.get("tool_calls") or ["read_file"]
         usage = {"prompt_tokens": 500 + len(prompt), "completion_tokens": 300}
-        return {"output": (ctx.get("gold_patch") or "MOCK_OUTPUT")[:2000],
-                "token_usage": usage, "tool_responses": [mock_tools.get(t, "MOCK") for t in tool_calls]}
+        return {
+            "output": (ctx.get("gold_patch") or "MOCK_OUTPUT")[:2000],
+            "token_usage": usage,
+            "tool_responses": [mock_tools.get(t, "MOCK") for t in tool_calls],
+        }
 
     exec_fn = executor or _mock_executor
 
@@ -100,7 +103,7 @@ def agent_bench_harness(
             ctx = {"gold_patch": bt.gold_patch, "tool_calls": task.get("tool_calls")}
             try:
                 res = exec_fn(vendor, bt.prompt, ctx)
-            except Exception:  # noqa: BLE001 - 单任务失败计入 0
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
                 res = {"output": "", "token_usage": {}}
             usage = res.get("token_usage") or {}
             sim = _patch_similarity(str(res.get("output", "")), bt.gold_patch)
@@ -117,10 +120,14 @@ def agent_bench_harness(
         br.duration_s = time.time() - t0
         results[vendor] = br
 
-    return {"per_vendor": {v: br.to_dict() for v, br in results.items()},
-            "summary": {"vendors": vendors, "tasks": len(tasks),
-                        "best": max(results, key=lambda v: results[v].pass_rate)
-                        if results else None}}
+    return {
+        "per_vendor": {v: br.to_dict() for v, br in results.items()},
+        "summary": {
+            "vendors": vendors,
+            "tasks": len(tasks),
+            "best": max(results, key=lambda v: results[v].pass_rate) if results else None,
+        },
+    }
 
 
 __all__ = ["BenchResult", "BenchTask", "agent_bench_harness"]

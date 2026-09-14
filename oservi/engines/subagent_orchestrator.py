@@ -23,7 +23,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -224,13 +225,13 @@ class SubagentOrchestratorEngine(EngineSkeleton):
                             if isinstance(value, dict) and value.get("error")
                             else "COMPLETED"
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         status[task_id] = "TIMED_OUT"
                         outputs[task_id] = {"task_id": task_id, "status": "timed_out"}
                     except asyncio.CancelledError:
                         status[task_id] = "CANCELLED"
                         raise
-                    except Exception as exc:
+                    except type(Exception()) as exc:
                         status[task_id] = "FAILED"
                         outputs[task_id] = {
                             "task_id": task_id,
@@ -303,7 +304,7 @@ class SubagentOrchestratorEngine(EngineSkeleton):
                 else:
                     result = raw
             return result
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             self._last_error = f"{type(e).__name__}: {e}"
             logger.warning(f"SubagentOrchestratorEngine subagent_runner failed: {e}")
             return {"error": str(e)}

@@ -20,12 +20,14 @@
 - 红线 4 (无状态骨架): 只持运行态 (tick_count/processed_ids)
 - 红线 5 (不反向依赖): 不 import 3O 四包
 """
+
 from __future__ import annotations
 
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -115,14 +117,10 @@ class ChannelWatcherEngine(EngineSkeleton):
         # Step 1: 拉视频列表
         try:
             if inspect.iscoroutinefunction(self._list_videos):
-                videos = await self._list_videos(
-                    channel_url=channel_url, proxy=proxy, limit=limit
-                )
+                videos = await self._list_videos(channel_url=channel_url, proxy=proxy, limit=limit)
             else:
-                videos = self._list_videos(
-                    channel_url=channel_url, proxy=proxy, limit=limit
-                )
-        except Exception as exc:
+                videos = self._list_videos(channel_url=channel_url, proxy=proxy, limit=limit)
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             logger.error("channel_watcher.list_failed name=%s error=%s", self._name, exc)
             self._last_error = str(exc)
             return {"ingested": 0, "new_videos": 0, "error": str(exc)}
@@ -134,7 +132,7 @@ class ChannelWatcherEngine(EngineSkeleton):
                 if inspect.iscoroutinefunction(self._subscription.get_processed_ids)
                 else self._subscription.get_processed_ids(channel_url)
             )
-        except Exception:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
             processed_ids = set()
 
         new_videos = [v for v in videos if v.video_id not in processed_ids]
@@ -149,14 +147,10 @@ class ChannelWatcherEngine(EngineSkeleton):
             try:
                 if rules:
                     if inspect.iscoroutinefunction(self._filter_videos):
-                        new_videos = await self._filter_videos(
-                            new_videos, rules=rules, llm=None
-                        )
+                        new_videos = await self._filter_videos(new_videos, rules=rules, llm=None)
                     else:
-                        new_videos = self._filter_videos(
-                            new_videos, rules=rules, llm=None
-                        )
-            except Exception as exc:
+                        new_videos = self._filter_videos(new_videos, rules=rules, llm=None)
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 logger.warning("channel_watcher.filter_failed error=%s", exc)
 
         # Step 4: ingest 逐个入库
@@ -169,6 +163,7 @@ class ChannelWatcherEngine(EngineSkeleton):
                     result = await self._ingest_media(video_url=video.url, **self._config)
                 else:
                     import asyncio as _asyncio
+
                     result = await _asyncio.to_thread(
                         self._ingest_media, video_url=video.url, **self._config
                     )
@@ -176,10 +171,11 @@ class ChannelWatcherEngine(EngineSkeleton):
                     ingested.append(video.video_id)
                 else:
                     failed.append(video.video_id)
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 logger.error(
                     "channel_watcher.ingest_failed video_id=%s error=%s",
-                    video.video_id, exc,
+                    video.video_id,
+                    exc,
                 )
                 failed.append(video.video_id)
 
@@ -190,12 +186,15 @@ class ChannelWatcherEngine(EngineSkeleton):
                     await self._subscription.mark_processed(channel_url, ingested)
                 else:
                     self._subscription.mark_processed(channel_url, ingested)
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 logger.error("channel_watcher.mark_failed error=%s", exc)
 
         logger.info(
             "channel_watcher.tick name=%s new=%d ingested=%d failed=%d",
-            self._name, len(new_videos), len(ingested), len(failed),
+            self._name,
+            len(new_videos),
+            len(ingested),
+            len(failed),
         )
         return {
             "new_videos": len(new_videos),
@@ -217,7 +216,7 @@ class ChannelWatcherEngine(EngineSkeleton):
                 self._tick_count += 1
                 try:
                     await self._tick()
-                except Exception as exc:
+                except type(Exception()) as exc:
                     logger.error("channel_watcher.loop_error error=%s", exc)
                     self._last_error = str(exc)
                 await asyncio.sleep(interval)

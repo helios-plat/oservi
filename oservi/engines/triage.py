@@ -28,7 +28,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -84,7 +85,6 @@ class TriageEngine(EngineSkeleton):
         ),
     }
     trigger_mode: str = "on_signal"
-
 
     def __init__(
         self,
@@ -161,7 +161,7 @@ class TriageEngine(EngineSkeleton):
         while self._running:
             try:
                 await self._iterate_once()
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 self._last_error = f"{type(e).__name__}: {e}"
                 logger.exception(f"TriageEngine '{self.name}' iteration failed")
             self._iteration_count += 1
@@ -209,7 +209,7 @@ class TriageEngine(EngineSkeleton):
         if result and self.on_triage_result:
             try:
                 self.on_triage_result(result)
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 logger.warning(f"on_triage_result callback failed: {e}")
 
     async def _fetch_events(self, max_events: int) -> list[dict[str, Any]]:
@@ -222,7 +222,7 @@ class TriageEngine(EngineSkeleton):
             if asyncio.iscoroutine(result):
                 result = await result
             return result if isinstance(result, list) else []
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             logger.warning(f"TriageEngine llm_caller fetch failed: {e}")
             return []
 
@@ -232,7 +232,7 @@ class TriageEngine(EngineSkeleton):
         for flt in self.filters:
             try:
                 result = [e for e in result if flt(event=e)]
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 logger.warning(f"filter {getattr(flt, '__name__', flt)} failed: {e}")
         return result
 
@@ -248,7 +248,7 @@ class TriageEngine(EngineSkeleton):
                 result = await result
             if isinstance(result, list):
                 return result
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             logger.warning(f"TriageEngine scoring failed, using raw events: {e}")
         # fallback: 不打分直接返回
         return [{"priority_score": 50, **e} for e in events]

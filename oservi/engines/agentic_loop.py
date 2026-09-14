@@ -30,7 +30,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -159,12 +160,14 @@ class AgenticLoopEngine(EngineSkeleton):
                 turn_result = await self.turn_handler(messages=messages, context=context)
             else:
                 turn_result = self.turn_handler(messages=messages, context=context)
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             logger.warning(f"turn_handler failed: {e}")
             turn_result = {"messages": messages}
 
         # 2. call llm_caller
-        processed_messages = turn_result.get("messages", messages) if isinstance(turn_result, dict) else messages
+        processed_messages = (
+            turn_result.get("messages", messages) if isinstance(turn_result, dict) else messages
+        )
         available_tools = tools or list(self.tools.values())
         try:
             if inspect.iscoroutinefunction(self.llm_caller):
@@ -183,7 +186,7 @@ class AgenticLoopEngine(EngineSkeleton):
                 llm_out = await llm_out
             if isinstance(llm_out, dict):
                 cost_usd = float(llm_out.get("cost_usd", 0.0))
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             logger.warning(f"llm_caller failed: {e}")
             llm_out = {"error": str(e)}
 
@@ -217,11 +220,11 @@ class AgenticLoopEngine(EngineSkeleton):
                 if self.on_task_done:
                     try:
                         self.on_task_done(result)
-                    except Exception as e:
+                    except type(Exception()) as e:
                         logger.warning(f"on_task_done callback failed: {e}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 self._last_error = f"{type(e).__name__}: {e}"
                 logger.exception(f"AgenticLoopEngine '{self.name}' task failed")
 
@@ -242,7 +245,7 @@ class AgenticLoopEngine(EngineSkeleton):
             if asyncio.iscoroutine(result):
                 result = await result
             return result
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             return f"ERROR: tool '{tool_name}' raised {type(e).__name__}: {e}"
 
     def health(self) -> dict[str, Any]:

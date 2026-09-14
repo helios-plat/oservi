@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from obase.computer import ComputerHandle, ComputerProfile
 from omodul.computer_session import (
@@ -32,7 +32,7 @@ async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
 class ComputerSupervisorEngine(EngineSkeleton):
     """On-demand lifecycle engine with all physical operations injected."""
 
-    injection_points: dict[str, Injection] = {  # noqa: RUF012
+    injection_points: ClassVar[dict] = {
         "computer_create": Injection(
             kind="oprim", cardinality="1", description="atomic computer creation"
         ),
@@ -121,7 +121,7 @@ class ComputerSupervisorEngine(EngineSkeleton):
             if isinstance(result, dict) and result.get("ok") is False:
                 self._last_error = str(result.get("error") or "computer operation failed")
             return cast(dict[str, Any], result)
-        except Exception as exc:  # noqa: BLE001 - engine boundary fails closed
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             self._last_error = f"{type(exc).__name__}: {exc}"
             return {"ok": False, "status": "failed", "error": self._last_error}
 
@@ -156,7 +156,7 @@ class ComputerSupervisorEngine(EngineSkeleton):
             if isinstance(result, dict) and result.get("status") == "failed":
                 self._last_error = str((result.get("error") or {}).get("message", ""))
             return cast(dict[str, Any], result)
-        except Exception as exc:  # noqa: BLE001 - engine boundary fails closed
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             self._last_error = f"{type(exc).__name__}: {exc}"
             return {"ok": False, "status": "failed", "error": self._last_error}
 

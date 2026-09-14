@@ -9,8 +9,9 @@ from typing import Any, ClassVar
 
 from obase.loop_breaker import init_breaker, reset_breaker
 from obase.veya_workspace import TaskNode
-from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 from oskill.dag_compiler import pick_ready_task_ids
+
+from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 
 
 class SpecDrivenGoalEngine(EngineSkeleton):

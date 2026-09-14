@@ -1,26 +1,27 @@
 """AlerterEngine 测试 — 双实证收敛后的机制验证."""
 
-import asyncio
 import pytest
-from unittest.mock import MagicMock
+
 from oservi import (
-    ServiceManifest,
-    ManifestValidationError,
     AlerterEngine,
+    ManifestValidationError,
+    ServiceManifest,
     assemble,
     list_skeletons,
 )
 
-
 # ===== Fake oprim evaluators (mock 业务规则) =====
+
 
 def fake_evaluator_sector_collapse(*, config):
     """模拟 oprim.detect_sector_collapse 返回 1 个告警事件."""
-    return [{
-        "entity_id": "sector_collapse_001",
-        "severity": "high",
-        "message": "Sector A collapsed 5%",
-    }]
+    return [
+        {
+            "entity_id": "sector_collapse_001",
+            "severity": "high",
+            "message": "Sector A collapsed 5%",
+        }
+    ]
 
 
 def fake_evaluator_no_events(*, config):
@@ -59,17 +60,21 @@ for fn in [
 
 # ===== Fake obase channels =====
 
+
 class _ChannelCalls:
     """记录 channel 调用."""
+
     def __init__(self):
         self.calls = []
 
 
 def make_fake_channel(recorder):
     """工厂: 创建一个记录调用的 channel callable."""
+
     def fake_channel(*, text, chat_id, bot_token):
         recorder.calls.append({"text": text, "chat_id": chat_id})
         return {"success": True}
+
     fake_channel.__module__ = "obase.notify.fake_channel"
     return fake_channel
 
@@ -84,10 +89,11 @@ fake_channel_telegram.__module__ = "obase.notify.telegram"  # type: ignore[attr-
 
 # ===== 测试: 注册 + 装配 =====
 
+
 class TestAlerterRegistration:
     def test_alerter_registered(self):
         assert "alerter" in list_skeletons()
-    
+
     def test_alerter_assemble_basic(self):
         m = ServiceManifest(
             name="test-alerter-1",
@@ -104,7 +110,7 @@ class TestAlerterRegistration:
         assert service.name == "test-alerter-1"
         assert len(service.evaluators) == 1
         assert len(service.channels) == 1
-    
+
     def test_alerter_no_trigger_raises(self):
         m = ServiceManifest(
             name="bad",
@@ -118,7 +124,7 @@ class TestAlerterRegistration:
         )
         with pytest.raises(ValueError, match="on_interval"):
             assemble(m)
-    
+
     def test_alerter_cardinality_1n_evaluators_enforced(self):
         m = ServiceManifest(
             name="bad",
@@ -131,6 +137,7 @@ class TestAlerterRegistration:
 
 
 # ===== 测试: 评估器调用 =====
+
 
 class TestAlerterEvaluatorInvocation:
     @pytest.mark.asyncio
@@ -145,7 +152,7 @@ class TestAlerterEvaluatorInvocation:
         events = await engine._call_evaluator(fake_evaluator_sector_collapse)
         assert len(events) == 1
         assert events[0]["entity_id"] == "sector_collapse_001"
-    
+
     @pytest.mark.asyncio
     async def test_call_evaluator_returns_empty(self):
         engine = AlerterEngine(
@@ -157,7 +164,7 @@ class TestAlerterEvaluatorInvocation:
         )
         events = await engine._call_evaluator(fake_evaluator_no_events)
         assert events == []
-    
+
     @pytest.mark.asyncio
     async def test_call_evaluator_dict_wrapped_to_list(self):
         engine = AlerterEngine(
@@ -174,9 +181,10 @@ class TestAlerterEvaluatorInvocation:
 
 # ===== 测试: 节流 =====
 
+
 class TestAlerterThrottle:
     def test_throttle_same_entity_within_window_filtered(self):
-        import time as t
+
         engine = AlerterEngine(
             evaluators=[fake_evaluator_sector_collapse],
             channels=[fake_channel_telegram],
@@ -189,11 +197,11 @@ class TestAlerterThrottle:
         ]
         filtered_1 = engine._filter_throttled_and_deduped(events)
         assert len(filtered_1) == 1
-        
+
         # 立即重复 → 被节流
         filtered_2 = engine._filter_throttled_and_deduped(events)
         assert len(filtered_2) == 0
-    
+
     def test_different_entities_not_throttled(self):
         engine = AlerterEngine(
             evaluators=[fake_evaluator_sector_collapse],
@@ -208,7 +216,7 @@ class TestAlerterThrottle:
         ]
         filtered = engine._filter_throttled_and_deduped(events)
         assert len(filtered) == 2
-    
+
     def test_no_throttle_when_throttle_seconds_zero(self):
         engine = AlerterEngine(
             evaluators=[fake_evaluator_sector_collapse],
@@ -224,6 +232,7 @@ class TestAlerterThrottle:
 
 
 # ===== 测试: 去重 =====
+
 
 class TestAlerterDedup:
     def test_dedup_same_bucket_filtered(self):
@@ -244,6 +253,7 @@ class TestAlerterDedup:
 
 # ===== 测试: 静音时段 =====
 
+
 class TestAlerterQuietHours:
     def test_no_quiet_hours_config(self):
         engine = AlerterEngine(
@@ -254,7 +264,7 @@ class TestAlerterQuietHours:
             name="t",
         )
         assert engine._is_in_quiet_hours() is False
-    
+
     def test_invalid_quiet_hours_returns_false(self):
         engine = AlerterEngine(
             evaluators=[fake_evaluator_sector_collapse],
@@ -268,13 +278,14 @@ class TestAlerterQuietHours:
 
 # ===== 测试: 推送到通道 =====
 
+
 class TestAlerterDispatch:
     @pytest.mark.asyncio
     async def test_dispatch_calls_all_channels(self):
         recorder = _ChannelCalls()
         ch1 = make_fake_channel(recorder)
         ch2 = make_fake_channel(recorder)
-        
+
         engine = AlerterEngine(
             evaluators=[fake_evaluator_sector_collapse],
             channels=[ch1, ch2],
@@ -284,7 +295,7 @@ class TestAlerterDispatch:
         )
         event = {"entity_id": "e1", "severity": "warn", "message": "test msg"}
         await engine._dispatch_to_channels(event)
-        
+
         assert len(recorder.calls) == 2  # 2 channels each called once
         for call in recorder.calls:
             assert "test msg" in call["text"]
@@ -293,12 +304,13 @@ class TestAlerterDispatch:
 
 # ===== 测试: 完整迭代 (端到端 mock) =====
 
+
 class TestAlerterFullIteration:
     @pytest.mark.asyncio
     async def test_iterate_once_calls_evaluators_and_dispatches(self):
         recorder = _ChannelCalls()
         ch = make_fake_channel(recorder)
-        
+
         engine = AlerterEngine(
             evaluators=[fake_evaluator_sector_collapse, fake_evaluator_no_events],
             channels=[ch],
@@ -307,16 +319,16 @@ class TestAlerterFullIteration:
             name="t",
         )
         await engine._iterate_once()
-        
+
         # sector_collapse 返 1 事件 → 推送; no_events 返空 → 不推
         assert len(recorder.calls) == 1
         assert "sector_collapse_001" in recorder.calls[0]["text"]
-    
+
     @pytest.mark.asyncio
     async def test_iterate_once_evaluator_exception_isolated(self):
         recorder = _ChannelCalls()
         ch = make_fake_channel(recorder)
-        
+
         engine = AlerterEngine(
             evaluators=[fake_evaluator_raises, fake_evaluator_sector_collapse],
             channels=[ch],
@@ -330,6 +342,7 @@ class TestAlerterFullIteration:
 
 
 # ===== 测试: 健康检查 =====
+
 
 class TestAlerterHealth:
     def test_health_initial(self):
@@ -349,6 +362,7 @@ class TestAlerterHealth:
 
 
 # ===== 测试: 红线 4 — 无状态骨架定义 =====
+
 
 class TestAlerterNoStaticState:
     def test_two_instances_have_independent_state(self):

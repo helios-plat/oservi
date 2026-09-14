@@ -35,11 +35,10 @@ import inspect
 import json
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
-
+from typing import Any, ClassVar, Literal
 
 # ---------------------------------------------------------------------------
 # InjectionKind / Injection 契约（§8.3）
@@ -67,7 +66,7 @@ class ManifestValidationError(Exception):
 class EngineSkeleton:
     """所有 oservice 引擎的基类。"""
 
-    injection_points: dict[str, Injection] = {}
+    injection_points: ClassVar[dict] = {}
 
     def __init__(self, *, trigger: dict, config: dict | None = None):
         self.trigger = trigger
@@ -76,7 +75,7 @@ class EngineSkeleton:
         self._tick_count = 0
         self._injected: dict[str, Any] = {}
 
-    def assemble(self, **kwargs) -> "EngineSkeleton":
+    def assemble(self, **kwargs) -> EngineSkeleton:
         """
         装配注入点。检查 required（cardinality="1" 或 "1..n"）是否满足。
         返回 self 以支持链式调用。
@@ -152,7 +151,7 @@ class AgenticLoop(EngineSkeleton):
     Build 模式核心循环引擎（on_demand）。
     """
 
-    injection_points = {
+    injection_points: ClassVar[dict] = {
         "llm_caller": Injection(
             kind="oprim",
             cardinality="1",
@@ -243,7 +242,7 @@ class AgenticLoop(EngineSkeleton):
             return [t for t in tools if t.readonly]
         return tools
 
-    def _hook(self, event: str, payload: dict) -> "asyncio.coroutine":
+    def _hook(self, event: str, payload: dict) -> asyncio.coroutine:
         dispatch = self._injected.get("hook_dispatch")
         if dispatch:
             return dispatch(event, payload)
@@ -398,7 +397,7 @@ class AgenticLoop(EngineSkeleton):
                         "events": state.events,
                     }
                 task = task + _lt_ctx.prompt_suffix  # next_action 提示注入 LLM
-            except Exception as _lt_exc:
+            except type(Exception()) as _lt_exc:
                 status = "failed"
                 final_text = f"[long task hook error: {_lt_exc}]"
                 state.record(event="long_task_error", error=str(_lt_exc))
@@ -508,7 +507,7 @@ class AgenticLoop(EngineSkeleton):
                 if long_task is not None:
                     try:
                         await long_task.post_round({"cost_usd": call_cost})
-                    except Exception as _lt_exc:
+                    except type(Exception()) as _lt_exc:
                         status = "failed"
                         final_text = f"[long task hook error: {_lt_exc}]"
                         state.record(event="long_task_error", error=str(_lt_exc))
@@ -518,7 +517,7 @@ class AgenticLoop(EngineSkeleton):
             status = "interrupted"
             state.record(event="cancelled")
             raise
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             status = "failed"
             state.record(event="error", error=str(exc))
             final_text = f"[engine error: {exc}]"
@@ -628,7 +627,7 @@ class AgenticLoop(EngineSkeleton):
             result_str = json.dumps(result) if isinstance(result, dict) else str(result)
             state.record(event="tool_result", tool=tool_name, result_preview=result_str[:200])
 
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             result_str = f"[tool error: {exc}]"
             state.record(event="tool_error", tool=tool_name, error=str(exc))
 
@@ -682,7 +681,7 @@ class AgenticLoop(EngineSkeleton):
             compacted = result.get("messages", messages[-20:])
             state.record(event="context_compacted", before=len(messages), after=len(compacted))
             return compacted
-        except Exception:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
             return messages[-20:]
 
 

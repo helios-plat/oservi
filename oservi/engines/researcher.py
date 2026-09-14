@@ -28,7 +28,8 @@
 
 import asyncio
 import logging
-from typing import Callable, Any
+from collections.abc import Callable
+from typing import Any, ClassVar
 from urllib.parse import urlparse, urlunparse
 
 from oservi.engines._base import (
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 class ResearcherEngine(EngineSkeleton):
     """Researcher 引擎骨架.
-    
+
     机制 (骨架固化):
     - LLM rewrite query → N 搜索词
     - 并发调用 search_oprim 收集 URL
@@ -50,7 +51,7 @@ class ResearcherEngine(EngineSkeleton):
     - 并发调用 fetch_oprim 抓 HTML
     - (可选) 调 ingest_omodul 落库
     - 返回结构化 {query, search_terms, articles, ingested_ids}
-    
+
     Example:
         manifest = ServiceManifest(
             name="stratum-researcher",
@@ -72,8 +73,8 @@ class ResearcherEngine(EngineSkeleton):
         engine = assemble(manifest)
         result = await engine.research(query="量子计算最新进展", user_id="user_123")
     """
-    
-    injection_points = {
+
+    injection_points: ClassVar[dict] = {
         "search_oprim": Injection(
             kind="oprim",
             cardinality="1..n",
@@ -95,7 +96,7 @@ class ResearcherEngine(EngineSkeleton):
             description="(可选) 落库 omodul (e.g. process_inbox_substrate). 缺则不落库",
         ),
     }
-    
+
     def __init__(
         self,
         *,
@@ -110,30 +111,30 @@ class ResearcherEngine(EngineSkeleton):
         self.name = name
         self.search_oprim = search_oprim
         self.fetch_oprim_fn = fetch_oprim[0]  # cardinality=1
-        self.llm_caller = llm_caller[0]       # cardinality=1
+        self.llm_caller = llm_caller[0]  # cardinality=1
         self.ingest_omodul_fn = ingest_omodul[0] if ingest_omodul else None
         self.trigger = trigger
         self.config = config
-        
+
         self._running = False
         self._research_count = 0
         self._last_error: str | None = None
-    
+
     # ===== 引擎生命周期 =====
-    
+
     def run(self) -> None:
         """Researcher 引擎默认是 on-demand, run() 仅标 running=True.
-        
+
         服务层通过 research() 方法主动触发. 如要 cron 触发, 用 trigger.on_cron + 外部调度.
         """
         self._running = True
         logger.info(f"ResearcherEngine '{self.name}' ready")
-    
+
     def stop(self) -> None:
         self._running = False
-    
+
     # ===== 核心方法 =====
-    
+
     async def research(
         self,
         *,
@@ -142,12 +143,12 @@ class ResearcherEngine(EngineSkeleton):
         max_articles_override: int | None = None,
     ) -> dict[str, Any]:
         """执行一次 research workflow.
-        
+
         Args:
             query: 用户查询
             user_id: 用户 id (落库用, 可选)
             max_articles_override: 临时覆盖 config.max_total_articles
-        
+
         Returns:
             {
                 "query": str,
@@ -161,11 +162,11 @@ class ResearcherEngine(EngineSkeleton):
         max_total = max_articles_override or self.config.get("max_total_articles", 20)
         max_search_terms = self.config.get("max_search_terms", 5)
         max_per_term = self.config.get("max_articles_per_term", 5)
-        
+
         try:
             # 1. LLM rewrite query → 搜索词列表
             search_terms = await self._llm_rewrite(query, max_search_terms)
-            
+
             if not search_terms:
                 return {
                     "query": query,
@@ -175,24 +176,20 @@ class ResearcherEngine(EngineSkeleton):
                     "status": "partial",
                     "error": "llm_rewrite_returned_empty",
                 }
-            
+
             # 2. 并发搜索
-            unique_articles = await self._search_and_dedupe(
-                search_terms, max_per_term, max_total
-            )
-            
+            unique_articles = await self._search_and_dedupe(search_terms, max_per_term, max_total)
+
             # 3. 并发 fetch HTML
             articles_with_content = await self._fetch_articles(unique_articles)
-            
+
             # 4. (可选) 落库
             ingested_ids = []
             if self.ingest_omodul_fn and user_id:
-                ingested_ids = await self._ingest_articles(
-                    articles_with_content, query, user_id
-                )
-            
+                ingested_ids = await self._ingest_articles(articles_with_content, query, user_id)
+
             self._research_count += 1
-            
+
             return {
                 "query": query,
                 "search_terms": search_terms,
@@ -201,8 +198,8 @@ class ResearcherEngine(EngineSkeleton):
                 "status": "completed",
                 "error": None,
             }
-        
-        except Exception as e:
+
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             self._last_error = f"{type(e).__name__}: {e}"
             logger.exception(f"ResearcherEngine '{self.name}' research failed")
             return {
@@ -213,9 +210,9 @@ class ResearcherEngine(EngineSkeleton):
                 "status": "failed",
                 "error": str(e),
             }
-    
+
     # ===== 内部方法 =====
-    
+
     async def _llm_rewrite(self, query: str, max_terms: int) -> list[str]:
         """LLM rewrite query → 搜索词列表."""
         prompt = f"""Rewrite this query into {max_terms} concise search terms for web search.
@@ -224,27 +221,28 @@ Query: {query}
 
 Return ONLY a JSON array of strings, no other text.
 Example: ["term 1", "term 2", "term 3"]"""
-        
+
         try:
             resp = await self._call_llm(
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=512,
             )
             return self._parse_search_terms(resp, max_terms)
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             logger.warning(f"LLM rewrite failed: {e}")
             return [query]  # fallback: 用原 query 作为唯一搜索词
-    
+
     async def _call_llm(self, **kwargs) -> Any:
         """统一 LLM 调用接口 (sync/async 都支持)."""
         result = self.llm_caller(**kwargs)
         if asyncio.iscoroutine(result):
             result = await result
         return result
-    
+
     def _parse_search_terms(self, resp: Any, max_terms: int) -> list[str]:
         """解析 LLM 响应到搜索词列表."""
         import json
+
         try:
             content = resp.get("content", "") if isinstance(resp, dict) else str(resp)
             # 尝试提取 JSON array (LLM 可能返回有 markdown 包装)
@@ -257,7 +255,7 @@ Example: ["term 1", "term 2", "term 3"]"""
         except (json.JSONDecodeError, AttributeError, IndexError):
             pass
         return []
-    
+
     async def _search_and_dedupe(
         self,
         search_terms: list[str],
@@ -266,7 +264,7 @@ Example: ["term 1", "term 2", "term 3"]"""
     ) -> list[dict[str, Any]]:
         """并发调所有 search_oprim, 跨搜索词去重."""
         all_results: list[list[dict]] = []
-        
+
         # 对每个搜索词, 并发调所有 search_oprim
         for term in search_terms:
             term_results = await asyncio.gather(
@@ -276,13 +274,13 @@ Example: ["term 1", "term 2", "term 3"]"""
                 ],
                 return_exceptions=True,
             )
-            
+
             for r in term_results:
                 if isinstance(r, Exception):
                     logger.warning(f"search oprim failed for term '{term}': {r}")
                     continue
                 all_results.append(r)
-        
+
         # URL canonical 去重
         seen_urls: set[str] = set()
         unique: list[dict[str, Any]] = []
@@ -296,7 +294,7 @@ Example: ["term 1", "term 2", "term 3"]"""
                 if len(unique) >= max_total:
                     return unique
         return unique
-    
+
     async def _call_search_oprim(
         self, oprim_fn: Callable, query: str, max_results: int
     ) -> list[dict[str, Any]]:
@@ -305,7 +303,7 @@ Example: ["term 1", "term 2", "term 3"]"""
         if asyncio.iscoroutine(result):
             result = await result
         return result if isinstance(result, list) else []
-    
+
     def _canonicalize_url(self, url: str) -> str:
         """URL canonicalization for dedup."""
         if not url:
@@ -313,16 +311,14 @@ Example: ["term 1", "term 2", "term 3"]"""
         try:
             p = urlparse(url)
             return urlunparse((p.scheme, p.netloc.lower(), p.path.rstrip("/"), "", "", ""))
-        except Exception:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
             return url
-    
-    async def _fetch_articles(
-        self, articles: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+
+    async def _fetch_articles(self, articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """并发调 fetch_oprim 抓 HTML."""
         concurrency = self.config.get("fetch_concurrency", 5)
         semaphore = asyncio.Semaphore(concurrency)
-        
+
         async def fetch_one(article: dict) -> dict | None:
             async with semaphore:
                 try:
@@ -330,13 +326,13 @@ Example: ["term 1", "term 2", "term 3"]"""
                     if asyncio.iscoroutine(result):
                         result = await result
                     return {**article, "content": result}
-                except Exception as e:
+                except type(Exception()) as e:
                     logger.warning(f"fetch failed {article.get('url')}: {e}")
                     return None
-        
+
         results = await asyncio.gather(*[fetch_one(a) for a in articles])
         return [r for r in results if r is not None]
-    
+
     async def _ingest_articles(
         self,
         articles: list[dict[str, Any]],
@@ -357,15 +353,19 @@ Example: ["term 1", "term 2", "term 3"]"""
                     result = await result
                 # omodul 返 dict, 提取 substrate_id (findings 字段)
                 if isinstance(result, dict):
-                    sub_id = result.get("findings", {}).get("substrate_id") if isinstance(result.get("findings"), dict) else None
+                    sub_id = (
+                        result.get("findings", {}).get("substrate_id")
+                        if isinstance(result.get("findings"), dict)
+                        else None
+                    )
                     if sub_id:
                         ingested.append(sub_id)
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 logger.warning(f"ingest failed for {article.get('url')}: {e}")
         return ingested
-    
+
     # ===== 健康检查 =====
-    
+
     def health(self) -> dict[str, Any]:
         return {
             "status": "healthy" if self._running else "stopped",

@@ -9,24 +9,26 @@ v0.1 朴素契约:
 - 红线 3 (注入类型契约): 装配前强制校验 kind + cardinality
 """
 
-from typing import Callable, Any
-from oservi.manifest import ServiceManifest, ManifestValidationError
+from collections.abc import Callable
+from typing import Any
+
 from oservi.engines._base import (
     EngineSkeleton,
     Injection,
     get_skeleton,
 )
+from oservi.manifest import ManifestValidationError, ServiceManifest
 
 
 def _detect_element_kind(callable_obj: Callable[..., Any]) -> str:
     """检测 callable 来自哪个层 (oprim/oskill/omodul/obase).
-    
+
     通过 __module__ 前缀判定. 校验失败返回 "unknown".
     """
     module = getattr(callable_obj, "__module__", "")
     if not module:
         return "unknown"
-    
+
     top_pkg = module.split(".")[0]
     if top_pkg in ("oprim", "oskill", "omodul", "obase"):
         return top_pkg
@@ -64,11 +66,10 @@ def _validate_injection(
             raise ManifestValidationError(
                 f"injection '{point_name}' requires cardinality=0..1, got {count}"
             )
-    elif card == "1..n":
-        if count < 1:
-            raise ManifestValidationError(
-                f"injection '{point_name}' requires cardinality=1..n, got {count}"
-            )
+    elif card == "1..n" and count < 1:
+        raise ManifestValidationError(
+            f"injection '{point_name}' requires cardinality=1..n, got {count}"
+        )
     # "0..n" 无限制
 
     # kind 类型校验 (每个 ref 的来源层必须匹配 point.kind)
@@ -87,12 +88,12 @@ def _validate_injection(
 
 def validate_manifest(manifest: ServiceManifest) -> None:
     """装配前校验 Manifest 合规性.
-    
+
     校验项:
     1. skeleton 已注册
     2. 每个注入点的 refs 满足 cardinality
     3. 每个 ref 的层级匹配 point.kind
-    
+
     Raises:
         ManifestValidationError: 任一校验失败
     """
@@ -101,14 +102,14 @@ def validate_manifest(manifest: ServiceManifest) -> None:
         skeleton_cls = get_skeleton(manifest.skeleton)
     except KeyError as e:
         raise ManifestValidationError(str(e)) from e
-    
+
     # 2 + 3. 注入点校验
     declared_points = skeleton_cls.injection_points
-    
+
     for point_name, point in declared_points.items():
         refs = manifest.inject.get(point_name)
         _validate_injection(point_name, point, refs)
-    
+
     # 4. Manifest.inject 不能含骨架未声明的注入点 (防 typo)
     for point_name in manifest.inject:
         if point_name not in declared_points:
@@ -120,16 +121,16 @@ def validate_manifest(manifest: ServiceManifest) -> None:
 
 def assemble(manifest: ServiceManifest) -> EngineSkeleton:
     """装配 Manifest → Service 实例.
-    
+
     Args:
         manifest: 服务声明
-    
+
     Returns:
         EngineSkeleton 实例 (可 .run() 启动)
-    
+
     Raises:
         ManifestValidationError: Manifest 校验失败
-    
+
     Example:
         >>> manifest = ServiceManifest(name="alerter-1", skeleton="alerter", ...)
         >>> service = assemble(manifest)
@@ -137,10 +138,10 @@ def assemble(manifest: ServiceManifest) -> EngineSkeleton:
     """
     # 红线 3: 装配前校验
     validate_manifest(manifest)
-    
+
     # 加载骨架
     skeleton_cls = get_skeleton(manifest.skeleton)
-    
+
     # 构造 Service 实例 (骨架 __init__ 接收注入参数 + trigger + config)
     service = skeleton_cls(
         **manifest.inject,
@@ -148,5 +149,5 @@ def assemble(manifest: ServiceManifest) -> EngineSkeleton:
         config=manifest.config,
         name=manifest.name,
     )
-    
+
     return service

@@ -21,14 +21,16 @@
 - 红线 4: 只持运行态
 - 红线 5: 不 import 3O 四包
 """
+
 from __future__ import annotations
 
 import asyncio
 import inspect
 import logging
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -145,7 +147,7 @@ class ArxivWatcherEngine(EngineSkeleton):
                     after_date=after_date,
                     max_results=max_results,
                 )
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             logger.error("arxiv_watcher.search_failed name=%s error=%s", self._name, exc)
             self._last_error = str(exc)
             return {"ingested": 0, "new_papers": 0, "error": str(exc)}
@@ -157,7 +159,7 @@ class ArxivWatcherEngine(EngineSkeleton):
                 if inspect.iscoroutinefunction(self._subscription.get_processed_ids)
                 else self._subscription.get_processed_ids(self._name)
             )
-        except Exception:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
             processed_ids = set()
 
         new_papers = [p for p in papers if p.arxiv_id not in processed_ids]
@@ -171,14 +173,10 @@ class ArxivWatcherEngine(EngineSkeleton):
             if llm_filter:
                 try:
                     if inspect.iscoroutinefunction(self._filter):
-                        new_papers = await self._filter(
-                            new_papers, llm_filter=llm_filter, llm=None
-                        )
+                        new_papers = await self._filter(new_papers, llm_filter=llm_filter, llm=None)
                     else:
-                        new_papers = self._filter(
-                            new_papers, llm_filter=llm_filter, llm=None
-                        )
-                except Exception as exc:
+                        new_papers = self._filter(new_papers, llm_filter=llm_filter, llm=None)
+                except type(Exception()) as exc:
                     logger.warning("arxiv_watcher.filter_failed error=%s", exc)
 
         # Step 4+5: 逐个下载 + 入库
@@ -192,9 +190,7 @@ class ArxivWatcherEngine(EngineSkeleton):
                 if inspect.iscoroutinefunction(self._download):
                     await self._download(url=paper.pdf_url, dest=pdf_path)
                 else:
-                    await asyncio.to_thread(
-                        self._download, url=paper.pdf_url, dest=pdf_path
-                    )
+                    await asyncio.to_thread(self._download, url=paper.pdf_url, dest=pdf_path)
 
                 # 入库
                 ingest_kwargs = {
@@ -220,10 +216,11 @@ class ArxivWatcherEngine(EngineSkeleton):
                 else:
                     failed.append(paper.arxiv_id)
 
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 logger.error(
                     "arxiv_watcher.ingest_failed arxiv_id=%s error=%s",
-                    paper.arxiv_id, exc,
+                    paper.arxiv_id,
+                    exc,
                 )
                 failed.append(paper.arxiv_id)
             finally:
@@ -238,12 +235,15 @@ class ArxivWatcherEngine(EngineSkeleton):
                     await self._subscription.mark_processed(self._name, ingested)
                 else:
                     self._subscription.mark_processed(self._name, ingested)
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 logger.error("arxiv_watcher.mark_failed error=%s", exc)
 
         logger.info(
             "arxiv_watcher.tick name=%s new=%d ingested=%d failed=%d",
-            self._name, len(new_papers), len(ingested), len(failed),
+            self._name,
+            len(new_papers),
+            len(ingested),
+            len(failed),
         )
         return {
             "new_papers": len(new_papers),
@@ -261,7 +261,7 @@ class ArxivWatcherEngine(EngineSkeleton):
                 self._tick_count += 1
                 try:
                     await self._tick()
-                except Exception as exc:
+                except type(Exception()) as exc:
                     logger.error("arxiv_watcher.loop_error error=%s", exc)
                     self._last_error = str(exc)
                 await asyncio.sleep(interval)

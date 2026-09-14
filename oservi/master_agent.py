@@ -712,7 +712,7 @@ class MasterAgent:
                 "content": f"[Tool {tool_name} SUCCESS]\nResult:\n{_truncate(result)}",
             }
             return trace_entry, tool_message
-        except Exception as exc:  # noqa: BLE001 — tool failure feeds reflection, not the user
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             _log.warning("[Master %s] tool %s failed: %s", sid, tool_name, exc)
             self.notify(
                 {
@@ -939,7 +939,7 @@ class MasterAgent:
                             **messages[-1],
                             "content": messages[-1]["content"] + _lt_ctx.prompt_suffix,
                         }
-                except Exception as _lt_exc:  # noqa: BLE001 — 钩子失败转明确错误, 不崩循环
+                except type(Exception()) as _lt_exc:
                     _log.error("[Master %s] long_task hook error: %s", sid, _lt_exc)
                     self.notify(
                         {
@@ -963,7 +963,7 @@ class MasterAgent:
                     messages, llm_kwargs=llm_kwargs
                 )
                 total_cost += model_cost
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 error = f"LLM call timed out after {self.llm_timeout_s:g}s"
                 _log.error("[Master %s] %s", sid, error)
                 self.notify(
@@ -983,7 +983,7 @@ class MasterAgent:
                     "cost_usd": round(total_cost, 6),
                     "session_id": sid,
                 }
-            except Exception as exc:  # noqa: BLE001 — LLM 网络/鉴权失败: 明确返回而非循环
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 _log.error("[Master %s] LLM call failed: %s", sid, exc)
                 self.notify(
                     {
@@ -1152,18 +1152,20 @@ class MasterAgent:
                     }
                 )
             if no_progress_rounds >= _NO_PROGRESS_LIMIT and not executable_specs:
-                repeated = ", ".join(sorted(set(spec[0] for spec in duplicate_specs.values())))
+                repeated = ", ".join(sorted({spec[0] for spec in duplicate_specs.values()}))
                 return stop_after_no_progress(f"repeated tool actions: {repeated}")
             _parallel_check = getattr(self.tools, "is_parallel_safe", None)
 
-            def _batch_parallel_safe() -> bool:
+            def _batch_parallel_safe(
+                _executable_specs=executable_specs, _parallel_check=_parallel_check
+            ) -> bool:
                 # Only when 2+ calls and every one is a registered, error-free,
                 # parallel-safe tool. Absent probe / any miss ⇒ sequential.
-                if len(executable_specs) < 2 or _parallel_check is None:
+                if len(_executable_specs) < 2 or _parallel_check is None:
                     return False
                 return all(
                     not spec_parse_err and bool(_parallel_check(spec_name))
-                    for spec_name, _spec_args, _spec_tc, spec_parse_err in executable_specs
+                    for spec_name, _spec_args, _spec_tc, spec_parse_err in _executable_specs
                 )
 
             if _batch_parallel_safe():
@@ -1213,9 +1215,7 @@ class MasterAgent:
                     )
 
             failed_tools = [
-                entry[0].get("tool", "")
-                for entry in results
-                if entry[0].get("status") == "failed"
+                entry[0].get("tool", "") for entry in results if entry[0].get("status") == "failed"
             ]
             if failed_tools:
                 self.notify(
@@ -1306,7 +1306,7 @@ class MasterAgent:
             if long_task is not None:
                 try:
                     await long_task.post_round({"cost_usd": total_cost})
-                except Exception as _lt_exc:  # noqa: BLE001 — 钩子失败转明确错误
+                except type(Exception()) as _lt_exc:
                     _log.error("[Master %s] long_task post_round error: %s", sid, _lt_exc)
                     return {
                         "status": "failed",
@@ -1326,9 +1326,8 @@ class MasterAgent:
                 if _verified_tool_result(tool_message.get("content"))
             ]
             if verified_messages:
-                final_answer = (
-                    "验证已通过。以下为工具返回的实际结果：\n"
-                    + str(verified_messages[-1].get("content") or "")
+                final_answer = "验证已通过。以下为工具返回的实际结果：\n" + str(
+                    verified_messages[-1].get("content") or ""
                 )
                 messages.append({"role": "assistant", "content": final_answer})
                 self.notify({"type": "master_done", "session_id": sid, "round": round_count})
@@ -1406,6 +1405,6 @@ class MasterAgent:
         if self._cost_calculator is not None:
             try:
                 return self._cost_calculator(response)
-            except Exception:  # noqa: BLE001 — cost failure must not break the loop
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
                 return 0.0
         return 0.0

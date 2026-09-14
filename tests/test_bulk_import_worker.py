@@ -50,13 +50,13 @@ processor_fails_on_row_2.__module__ = "omodul.fake"
 
 def _make_engine(**overrides):
     recorder: list = []
-    defaults = dict(
-        fetcher=sync_fetcher,
-        processor=make_processor(recorder),
-        trigger={"on_signal": "bulk_import.requested"},
-        config={},
-        name="test-importer",
-    )
+    defaults = {
+        "fetcher": sync_fetcher,
+        "processor": make_processor(recorder),
+        "trigger": {"on_signal": "bulk_import.requested"},
+        "config": {},
+        "name": "test-importer",
+    }
     defaults.update(overrides)
     return BulkImportWorkerEngine(**defaults), recorder
 

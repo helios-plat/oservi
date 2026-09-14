@@ -21,16 +21,10 @@ class BossOrchestrationEngine(EngineSkeleton):
         "inspector": Injection(
             kind="oprim", cardinality="1", description="capture project snapshot"
         ),
-        "intent_phase": Injection(
-            kind="omodul", cardinality="1", description="G0 intent triage"
-        ),
+        "intent_phase": Injection(kind="omodul", cardinality="1", description="G0 intent triage"),
         "plan_phase": Injection(kind="omodul", cardinality="1", description="G1 plan"),
-        "verify_phase": Injection(
-            kind="omodul", cardinality="1", description="G2 evidence verify"
-        ),
-        "leaf_executor": Injection(
-            kind="oprim", cardinality="1", description="hicode/dsh leaf"
-        ),
+        "verify_phase": Injection(kind="omodul", cardinality="1", description="G2 evidence verify"),
+        "leaf_executor": Injection(kind="oprim", cardinality="1", description="hicode/dsh leaf"),
     }
     trigger_mode: str = "on_demand"
 
@@ -139,9 +133,7 @@ class BossOrchestrationEngine(EngineSkeleton):
                     return {
                         "status": "blocked_needs_clarification",
                         "failed": node.id,
-                        "questions": [
-                            f"Task {node.id} requires a human decision before dispatch."
-                        ],
+                        "questions": [f"Task {node.id} requires a human decision before dispatch."],
                         "completed": sorted(completed),
                     }
                 node.status = "running"

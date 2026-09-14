@@ -21,7 +21,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -115,8 +116,10 @@ class SequentialComposerEngine(EngineSkeleton):
                         result = await raw
                     else:
                         result = raw
-            except Exception as e:
-                self._last_error = f"step {i} {getattr(step, '__name__', step)}: {type(e).__name__}: {e}"
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
+                self._last_error = (
+                    f"step {i} {getattr(step, '__name__', step)}: {type(e).__name__}: {e}"
+                )
                 logger.warning(f"SequentialComposerEngine '{self.name}' step {i} failed: {e}")
                 result = {"error": str(e), "step_no": i}
 
@@ -125,7 +128,7 @@ class SequentialComposerEngine(EngineSkeleton):
             if on_step:
                 try:
                     on_step({"step_no": i, "result": result})
-                except Exception as cb_err:
+                except type(Exception()) as cb_err:
                     logger.warning(f"on_step callback failed at step {i}: {cb_err}")
 
         return {"status": "completed", "results": results}

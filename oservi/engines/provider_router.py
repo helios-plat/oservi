@@ -9,7 +9,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from omodul.provider_inference import ProviderInferenceConfig, ProviderInferenceInput
 
@@ -32,7 +32,7 @@ async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
 class ProviderRouterEngine(EngineSkeleton):
     """On-demand provider selection and inference transaction mechanism."""
 
-    injection_points: dict[str, Injection] = {  # noqa: RUF012
+    injection_points: ClassVar[dict] = {
         "select_provider": Injection(
             kind="oskill", cardinality="1", description="stateless execution provider selector"
         ),
@@ -147,7 +147,7 @@ class ProviderRouterEngine(EngineSkeleton):
             if isinstance(result, dict) and result.get("status") == "failed":
                 self._last_error = str(result.get("error"))
             return cast(dict[str, Any], result)
-        except Exception as exc:  # noqa: BLE001 - service boundary fails closed
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             self._last_error = f"{type(exc).__name__}: {exc}"
             return {"status": "failed", "error": {"type": type(exc).__name__, "message": str(exc)}}
 

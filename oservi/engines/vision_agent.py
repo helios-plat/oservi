@@ -13,12 +13,10 @@ Stateful engine skeleton for vision agent sessions.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 # Graceful import: oservi may not be fully installed with all deps
 try:
@@ -28,13 +26,16 @@ try:
         register_skeleton,
     )
 except ImportError:
+
     class EngineSkeleton:
-        injection_points: dict = {}
+        injection_points: ClassVar[dict] = {}
+
     class Injection:
         def __init__(self, *, kind=None, cardinality=None, description=None):
             self.kind = kind
             self.cardinality = cardinality
             self.description = description
+
     def register_skeleton(name, cls):
         pass
 
@@ -76,26 +77,25 @@ class VisionAgentEngine(EngineSkeleton):
         tools          — layer4 tool adapters
     """
 
-    injection_points = {
+    injection_points: ClassVar[dict] = {
         "vision_skill": Injection(
-            kind="oskill", cardinality="1",
-            description="Vision analysis: (image, provider, prompt, **opts) -> VisionResult"
+            kind="oskill",
+            cardinality="1",
+            description="Vision analysis: (image, provider, prompt, **opts) -> VisionResult",
         ),
         "llm_caller": Injection(
-            kind="oprim", cardinality="1",
-            description="LLM call primitive for text-based follow-up"
+            kind="oprim", cardinality="1", description="LLM call primitive for text-based follow-up"
         ),
         "image_oprim": Injection(
-            kind="oprim", cardinality="1",
-            description="Image operations: encode/decode/validate"
+            kind="oprim", cardinality="1", description="Image operations: encode/decode/validate"
         ),
         "video_sampler": Injection(
-            kind="oskill", cardinality="0..1",
-            description="Video frame sampler: (path, interval, max) -> list[ImageFrame]"
+            kind="oskill",
+            cardinality="0..1",
+            description="Video frame sampler: (path, interval, max) -> list[ImageFrame]",
         ),
         "tools": Injection(
-            kind="layer4", cardinality="0..n",
-            description="Tool adapters for LLM function calling"
+            kind="layer4", cardinality="0..n", description="Tool adapters for LLM function calling"
         ),
     }
 
@@ -193,13 +193,15 @@ class VisionAgentEngine(EngineSkeleton):
                     prompt=prompt,
                     system_prompt=system_prompt,
                 )
-                results.append({
-                    "description": vis_result.description,
-                    "objects": vis_result.objects,
-                    "text_in_image": vis_result.text_in_image,
-                })
+                results.append(
+                    {
+                        "description": vis_result.description,
+                        "objects": vis_result.objects,
+                        "text_in_image": vis_result.text_in_image,
+                    }
+                )
                 state.images_processed = 1
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 state.record(event="vision_error", error=str(e))
                 results.append({"error": str(e)})
 
@@ -217,11 +219,11 @@ class VisionAgentEngine(EngineSkeleton):
                         img,
                         provider=provider,
                         model=model,
-                        prompt=f"Image {i+1}: {prompt}",
+                        prompt=f"Image {i + 1}: {prompt}",
                     )
                     results.append({"description": vis_result.description})
                     state.images_processed += 1
-                except Exception as e:
+                except type(Exception()) as e:
                     state.record(event="vision_error", index=i, error=str(e))
 
         elif media_type == "video":
@@ -254,13 +256,15 @@ class VisionAgentEngine(EngineSkeleton):
                         model=model,
                         prompt=f"Frame {i} (t={frame.timestamp_ms:.0f}ms): {prompt}",
                     )
-                    results.append({
-                        "frame_index": i,
-                        "timestamp_ms": frame.timestamp_ms,
-                        "description": vis_result.description,
-                    })
+                    results.append(
+                        {
+                            "frame_index": i,
+                            "timestamp_ms": frame.timestamp_ms,
+                            "description": vis_result.description,
+                        }
+                    )
                     state.images_processed += 1
-                except Exception as e:
+                except type(Exception()) as e:
                     state.record(event="vision_error", frame=i, error=str(e))
 
         # Generate summary from all results
@@ -271,7 +275,7 @@ class VisionAgentEngine(EngineSkeleton):
             descriptions = [r.get("description", "") for r in results if "description" in r]
             try:
                 summary_prompt = (
-                    f"Summarize these frame descriptions into a cohesive narrative:\n\n"
+                    "Summarize these frame descriptions into a cohesive narrative:\n\n"
                     + "\n\n---\n\n".join(f"[{i}]: {d}" for i, d in enumerate(descriptions))
                 )
                 summary_resp = await self.llm_caller(
@@ -281,7 +285,7 @@ class VisionAgentEngine(EngineSkeleton):
                 summary_text = summary_resp.get("content", "")
                 if isinstance(summary_text, list):
                     summary_text = summary_text[0].get("text", "") if summary_text else ""
-            except Exception:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
                 summary_text = "\n".join(descriptions)
         else:
             summary_text = results[0].get("description", "") if results else ""

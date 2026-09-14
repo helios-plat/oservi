@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
 
 from oservi import list_skeletons
 from oservi.engines.mcp_bridge import McpBridgeEngine
 
-
 # ===== Fake injectables =====
+
 
 def fake_connect(*, server_url, **kwargs):
     return {"connected": True, "url": server_url}
@@ -43,19 +42,20 @@ def fake_registry(*, tool_name):
 
 
 def _make_engine(**overrides):
-    defaults = dict(
-        connect=fake_connect,
-        call=[fake_call_fs, fake_call_search],
-        registry=fake_registry,
-        trigger={"on_demand": True},
-        config={},
-        name="test-mcp-bridge",
-    )
+    defaults = {
+        "connect": fake_connect,
+        "call": [fake_call_fs, fake_call_search],
+        "registry": fake_registry,
+        "trigger": {"on_demand": True},
+        "config": {},
+        "name": "test-mcp-bridge",
+    }
     defaults.update(overrides)
     return McpBridgeEngine(**defaults)
 
 
 # ===== Tests =====
+
 
 def test_mcp_bridge_registered():
     assert "mcp_bridge" in list_skeletons()
@@ -172,6 +172,7 @@ def test_connect_server_async():
 def test_connect_server_error():
     def bad_connect(*, server_url, **kw):
         raise ConnectionError("refused")
+
     engine = _make_engine(connect=bad_connect)
     result = asyncio.run(engine.connect_server("mcp://bad"))
     assert result["status"] == "error"

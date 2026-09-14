@@ -28,7 +28,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 
@@ -131,7 +132,7 @@ class SagaComposerEngine(EngineSkeleton):
         for i, step in enumerate(self.step_list):
             try:
                 result = await _call(step, input_data=input_data, step_no=i)
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 self._last_error = f"step {i} {getattr(step, '__name__', step)}: {e}"
                 logger.warning(f"SagaComposerEngine '{self.name}' step {i} raised: {e}")
                 result = {"status": "failed", "error": str(e)}
@@ -140,7 +141,7 @@ class SagaComposerEngine(EngineSkeleton):
             if on_step:
                 try:
                     on_step({"phase": "forward", "step_no": i, "result": result})
-                except Exception as cb_err:
+                except type(Exception()) as cb_err:
                     logger.warning(f"on_step callback failed at step {i}: {cb_err}")
 
             if isinstance(result, dict) and result.get("status") == "failed":
@@ -159,7 +160,7 @@ class SagaComposerEngine(EngineSkeleton):
                 comp_result = await _call(
                     compensation, input_data=input_data, step_no=i, step_result=results[i]
                 )
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 self._last_error = (
                     f"compensation {i} {getattr(compensation, '__name__', compensation)}: {e}"
                 )
@@ -170,7 +171,7 @@ class SagaComposerEngine(EngineSkeleton):
             if on_step:
                 try:
                     on_step({"phase": "compensate", "step_no": i, "result": comp_result})
-                except Exception as cb_err:
+                except type(Exception()) as cb_err:
                     logger.warning(f"on_step callback failed at compensation {i}: {cb_err}")
 
         return {

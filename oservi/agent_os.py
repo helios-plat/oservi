@@ -50,7 +50,7 @@ class AgentOS:
         if self.automata is not None:
             try:
                 self.automata.shutdown()
-            except Exception:  # noqa: BLE001 — shutdown must never raise
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
                 _log.exception("agent_os: automata shutdown failed")
         self._started = False
         _log.info("agent_os: offline")

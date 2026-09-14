@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 class EventWorkflowEngine:
@@ -26,7 +27,7 @@ class EventWorkflowEngine:
         self._retrigger: dict[str, str] = {}  # group → "all" | "any"
 
     # -- event registration -----------------------------------------------
-    def make_event(self, name: str = None, func: Callable | None = None) -> Callable:
+    def make_event(self, name: str | None = None, func: Callable | None = None) -> Callable:
         """Decorator: register an async function as a workflow event."""
         if func is not None:
             return self._register(name or func.__name__, func)
@@ -49,7 +50,9 @@ class EventWorkflowEngine:
         return name
 
     # -- group wiring -----------------------------------------------------
-    def listen_group(self, markers: list[str], name: str = None, retrigger: str = "all") -> Callable:
+    def listen_group(
+        self, markers: list[str], name: str | None = None, retrigger: str = "all"
+    ) -> Callable:
         """Wire a group listener: when all/any source events complete, fire."""
         group_name = name or "grp_" + hashlib.md5(str(markers).encode()).hexdigest()[:8]
         self._retrigger[group_name] = retrigger
@@ -103,7 +106,7 @@ class EventWorkflowEngine:
                     _EventInput({"event_id": eid, "name": ev.name}),
                     _EventCtx(ctx),
                 )
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 return {"error": str(exc)}
 
         # BFS-style: ready queue of events whose dependencies are all completed
@@ -112,9 +115,7 @@ class EventWorkflowEngine:
         ]
         while ready:
             # run current level in parallel
-            batch = [
-                _fire(eid, name) for eid, name in ready
-            ]
+            batch = [_fire(eid, name) for eid, name in ready]
             batch_results = await asyncio.gather(*batch)
             for (eid, name), br in zip(ready, batch_results):
                 results[name] = br
@@ -124,7 +125,7 @@ class EventWorkflowEngine:
             next_events = []
             remaining = set(self._events) - completed - set()
             for eid in remaining:
-                ev = self._events[eid]
+                self._events[eid]
                 # check which groups it belongs to
                 for g_name, g_eids in self._groups.items():
                     if eid in g_eids:
@@ -135,7 +136,9 @@ class EventWorkflowEngine:
                             if retrigger == "any" or triggers == (triggers & completed):
                                 # fire all events in this group
                                 for geid in g_eids:
-                                    if geid not in completed and geid not in {n for n, _ in next_events}:
+                                    if geid not in completed and geid not in {
+                                        n for n, _ in next_events
+                                    }:
                                         next_events.append((geid, self._events[geid].name))
             ready = next_events
 

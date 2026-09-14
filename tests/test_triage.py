@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+
 import pytest
 
 from oservi import TriageEngine, list_skeletons
 
-
 # ===== Fake injectables =====
+
 
 def fake_llm_caller(*, config, max_events=50, **kw):
     return [
@@ -38,19 +39,20 @@ def filter_high_only(*, event):
 
 
 def _make_engine(**overrides):
-    defaults = dict(
-        llm_caller=fake_llm_caller,
-        filters=None,
-        trigger={"on_signal": True},
-        config={},
-        name="test-triage",
-        on_triage_result=None,
-    )
+    defaults = {
+        "llm_caller": fake_llm_caller,
+        "filters": None,
+        "trigger": {"on_signal": True},
+        "config": {},
+        "name": "test-triage",
+        "on_triage_result": None,
+    }
     defaults.update(overrides)
     return TriageEngine(**defaults)
 
 
 # ===== Tests =====
+
 
 def test_triage_registered_as_skeleton():
     assert "triage" in list_skeletons()
@@ -222,7 +224,7 @@ async def test_triage_process_filter_drops_event():
 
 def test_triage_assemble_validates_required_llm_caller():
     from oservi import assemble
-    from oservi.manifest import ServiceManifest, ManifestValidationError
+    from oservi.manifest import ManifestValidationError, ServiceManifest
 
     m = ServiceManifest(
         name="t-no-llm",
@@ -241,6 +243,7 @@ def test_triage_on_signal_assemble():
 
     def _oprim_llm(*, config, **kw):
         return []
+
     _oprim_llm.__module__ = "oprim.test_utils"
 
     m = ServiceManifest(

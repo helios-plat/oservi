@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 
@@ -101,7 +102,7 @@ class EventWebhookDispatcherEngine(EngineSkeleton):
             while self._running:
                 try:
                     await bus.subscribe(self.topic, self._on_event, timeout=poll_timeout)
-                except Exception as e:
+                except type(Exception()) as e:
                     self._last_error = f"{type(e).__name__}: {e}"
                     logger.warning(
                         f"EventWebhookDispatcherEngine '{self.name}' subscribe error: {e}"

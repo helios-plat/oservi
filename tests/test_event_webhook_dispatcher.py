@@ -45,12 +45,12 @@ subscriber_raises.__module__ = "omodul.fake"
 
 def _make_engine(**overrides):
     recorder: list = []
-    defaults = dict(
-        subscribers=[make_subscriber(recorder)],
-        trigger={"on_signal": "order.placed"},
-        config={},
-        name="test-dispatcher",
-    )
+    defaults = {
+        "subscribers": [make_subscriber(recorder)],
+        "trigger": {"on_signal": "order.placed"},
+        "config": {},
+        "name": "test-dispatcher",
+    }
     defaults.update(overrides)
     return EventWebhookDispatcherEngine(**defaults), recorder
 
@@ -170,7 +170,7 @@ class TestEventWebhookDispatcherIntegration:
         client = redis_lib.Redis.from_url(url)
         try:
             await client.ping()
-        except Exception:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
             pytest.skip("Redis not available at TEST_REDIS_URL")
         finally:
             await client.aclose()

@@ -25,8 +25,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 
 from croniter import croniter
 
@@ -123,7 +124,7 @@ class CronSchedulerEngine(EngineSkeleton):
                 result = task()
                 if asyncio.iscoroutine(result):
                     await result
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 self._last_error = f"{getattr(task, '__name__', task)}: {e}"
                 logger.warning(f"CronSchedulerEngine '{self.name}' task failed: {e}")
         self._fire_count += 1

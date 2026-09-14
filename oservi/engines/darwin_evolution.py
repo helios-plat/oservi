@@ -32,8 +32,9 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 
@@ -44,7 +45,9 @@ _MUTATION_FACTORS = (0.8, 1.25, 1.1)
 # 非线性惩罚强度 (变种 3: 加入非线性惩罚项)
 _PENALTY_STRENGTH = 0.05
 # 信号列命名模式 (非线性惩罚注入目标)
-_SIGNAL_COL_RE = re.compile(r"(signal|score|weight|position|allocation|exposure|decision)", re.IGNORECASE)
+_SIGNAL_COL_RE = re.compile(
+    r"(signal|score|weight|position|allocation|exposure|decision)", re.IGNORECASE
+)
 
 
 class DarwinEvolutionEngine(EngineSkeleton):
@@ -83,7 +86,7 @@ class DarwinEvolutionEngine(EngineSkeleton):
         )
     """
 
-    injection_points = {
+    injection_points: ClassVar[dict] = {
         "backtest_fn": Injection(
             kind="layer4",
             cardinality="1",
@@ -132,7 +135,9 @@ class DarwinEvolutionEngine(EngineSkeleton):
             self._load_state()
 
         if "on_interval" not in trigger and "on_cron" not in trigger:
-            raise ValueError("DarwinEvolutionEngine trigger must contain 'on_interval' or 'on_cron'")
+            raise ValueError(
+                "DarwinEvolutionEngine trigger must contain 'on_interval' or 'on_cron'"
+            )
 
     # ===== 注册表操作 (机制) ==============================================
 
@@ -144,10 +149,10 @@ class DarwinEvolutionEngine(EngineSkeleton):
             "name": name or f"operator_{op_id[:6]}",
             "code": code,
             "status": "ACTIVE",
-            "lineage": [],                      # 谱系: 被替换掉的祖先代码
-            "fitness_history": [],              # [{ts, sharpe, source}]
+            "lineage": [],  # 谱系: 被替换掉的祖先代码
+            "fitness_history": [],  # [{ts, sharpe, source}]
             "shadow": {"observations": [], "accuracy_avg": None, "slippage_avg": None},
-            "candidate": None,                  # {code, sharpe, total_return, variants, prd_path, created_at}
+            "candidate": None,  # {code, sharpe, total_return, variants, prd_path, created_at}
             "created_at": time.time(),
             "updated_at": time.time(),
         }
@@ -214,16 +219,24 @@ class DarwinEvolutionEngine(EngineSkeleton):
         op["updated_at"] = time.time()
         self._save_state()
         decayed = self._is_decayed(op)
-        return {"operator_id": op_id, "samples": len(op["shadow"]["observations"]),
-                "accuracy_avg": op["shadow"]["accuracy_avg"], "slippage_avg": op["shadow"]["slippage_avg"],
-                "decayed": decayed}
+        return {
+            "operator_id": op_id,
+            "samples": len(op["shadow"]["observations"]),
+            "accuracy_avg": op["shadow"]["accuracy_avg"],
+            "slippage_avg": op["shadow"]["slippage_avg"],
+            "decayed": decayed,
+        }
 
     def _is_decayed(self, op: dict[str, Any]) -> bool:
         sh = op["shadow"]
         if len(sh["observations"]) < int(self.config.get("shadow_min_samples", 5)):
             return False
-        acc_below = sh["accuracy_avg"] is not None and sh["accuracy_avg"] < float(self.config.get("decay_accuracy_below", 0.55))
-        slip_above = sh["slippage_avg"] is not None and sh["slippage_avg"] > float(self.config.get("decay_slippage_above", 0.02))
+        acc_below = sh["accuracy_avg"] is not None and sh["accuracy_avg"] < float(
+            self.config.get("decay_accuracy_below", 0.55)
+        )
+        slip_above = sh["slippage_avg"] is not None and sh["slippage_avg"] > float(
+            self.config.get("decay_slippage_above", 0.02)
+        )
         return acc_below or slip_above
 
     # ===== 进化闭环 (机制) =================================================
@@ -238,8 +251,11 @@ class DarwinEvolutionEngine(EngineSkeleton):
         if op is None:
             raise KeyError(f"operator {op_id} not found")
         if op["status"] == "CANDIDATE" and not force:
-            return {"status": "already_candidate", "operator_id": op_id,
-                    "candidate": op["candidate"]}
+            return {
+                "status": "already_candidate",
+                "operator_id": op_id,
+                "candidate": op["candidate"],
+            }
 
         n = int(self.config.get("mutation_count", 3))
         asset_id = str(self.config.get("backtest_asset_id", "default"))
@@ -250,13 +266,17 @@ class DarwinEvolutionEngine(EngineSkeleton):
         if self.variant_fn is not None:
             try:
                 variants = list(await self.variant_fn(op["code"], n)) or []
-            except Exception as exc:  # pragma: no cover - LLM 层失败不阻断进化
-                logger.warning("DarwinEngine variant_fn failed: %s; falling back to AST mutation", exc)
+            except type(Exception()) as exc:  # pragma: no cover - LLM 层失败不阻断进化
+                logger.warning(
+                    "DarwinEngine variant_fn failed: %s; falling back to AST mutation", exc
+                )
                 variants = []
         if not variants:
             variants = self._mutate(op["code"], n)
         variants = variants[:n]
-        logger.info("DarwinEngine '%s': %d variants generated for %s", self.name, len(variants), op_id)
+        logger.info(
+            "DarwinEngine '%s': %d variants generated for %s", self.name, len(variants), op_id
+        )
 
         # 2. 优胜劣汰: 并发回测
         results = await asyncio.gather(
@@ -264,8 +284,13 @@ class DarwinEvolutionEngine(EngineSkeleton):
         )
         winners = [r for r in results if r.get("sharpe") is not None]
         if not winners:
-            return {"status": "failed", "operator_id": op_id, "variants": len(variants),
-                    "results": results, "reason": "all variants backtest failed"}
+            return {
+                "status": "failed",
+                "operator_id": op_id,
+                "variants": len(variants),
+                "results": results,
+                "reason": "all variants backtest failed",
+            }
 
         best = max(winners, key=lambda r: r["sharpe"])
         old_sharpe = op["fitness_history"][-1]["sharpe"] if op["fitness_history"] else None
@@ -276,8 +301,15 @@ class DarwinEvolutionEngine(EngineSkeleton):
             "code": best["code"],
             "sharpe": best["sharpe"],
             "total_return": best.get("total_return"),
-            "variants": [{"index": i, "sharpe": r.get("sharpe"), "total_return": r.get("total_return"),
-                          "error": r.get("error")} for i, r in enumerate(results)],
+            "variants": [
+                {
+                    "index": i,
+                    "sharpe": r.get("sharpe"),
+                    "total_return": r.get("total_return"),
+                    "error": r.get("error"),
+                }
+                for i, r in enumerate(results)
+            ],
             "prd_path": str(prd_path),
             "created_at": time.time(),
         }
@@ -287,16 +319,18 @@ class DarwinEvolutionEngine(EngineSkeleton):
 
         if self.notify_fn is not None:
             try:
-                self.notify_fn({
-                    "type": "PRD_REVIEW_REQUIRED",
-                    "operator_id": op_id,
-                    "operator_name": op["name"],
-                    "prd_path": str(prd_path),
-                    "old_sharpe": old_sharpe,
-                    "new_sharpe": best["sharpe"],
-                    "approve_endpoint": f"/evolution/operators/{op_id}/promote",
-                })
-            except Exception as exc:  # pragma: no cover
+                self.notify_fn(
+                    {
+                        "type": "PRD_REVIEW_REQUIRED",
+                        "operator_id": op_id,
+                        "operator_name": op["name"],
+                        "prd_path": str(prd_path),
+                        "old_sharpe": old_sharpe,
+                        "new_sharpe": best["sharpe"],
+                        "approve_endpoint": f"/evolution/operators/{op_id}/promote",
+                    }
+                )
+            except type(Exception()) as exc:  # pragma: no cover
                 logger.warning("DarwinEngine notify_fn failed: %s", exc)
 
         return {
@@ -304,19 +338,35 @@ class DarwinEvolutionEngine(EngineSkeleton):
             "operator_id": op_id,
             "variants": len(variants),
             "results": results,
-            "winner": {"index": results.index(best), "sharpe": best["sharpe"],
-                       "total_return": best.get("total_return")},
+            "winner": {
+                "index": results.index(best),
+                "sharpe": best["sharpe"],
+                "total_return": best.get("total_return"),
+            },
             "candidate": op["candidate"],
             "prd_path": str(prd_path),
         }
 
-    async def _safe_backtest(self, code: str, index: int, asset_id: str, params: dict) -> dict[str, Any]:
+    async def _safe_backtest(
+        self, code: str, index: int, asset_id: str, params: dict
+    ) -> dict[str, Any]:
         try:
             res = await self.backtest_fn(code, params, asset_id)
-            return {"index": index, "code": code, "sharpe": res.get("sharpe"),
-                    "total_return": res.get("total_return"), "error": res.get("error")}
-        except Exception as exc:
-            return {"index": index, "code": code, "sharpe": None, "total_return": None, "error": str(exc)}
+            return {
+                "index": index,
+                "code": code,
+                "sharpe": res.get("sharpe"),
+                "total_return": res.get("total_return"),
+                "error": res.get("error"),
+            }
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
+            return {
+                "index": index,
+                "code": code,
+                "sharpe": None,
+                "total_return": None,
+                "error": str(exc),
+            }
 
     def promote(self, op_id: str) -> dict[str, Any]:
         """审批 PRD → 用候选算子替换 ACTIVE (谱系保留旧代码)."""
@@ -328,16 +378,29 @@ class DarwinEvolutionEngine(EngineSkeleton):
             raise ValueError(f"operator {op_id} has no pending candidate (run evolve first)")
         op["lineage"].append(op["code"])
         op["code"] = cand["code"]
-        op["fitness_history"].append({
-            "ts": time.time(), "sharpe": cand["sharpe"], "source": "evolution",
-        })
+        op["fitness_history"].append(
+            {
+                "ts": time.time(),
+                "sharpe": cand["sharpe"],
+                "source": "evolution",
+            }
+        )
         op["status"] = "ACTIVE"
         op["candidate"] = None
         op["updated_at"] = time.time()
         self._save_state()
-        logger.info("DarwinEngine '%s': %s promoted (lineage depth %d)", self.name, op_id, len(op["lineage"]))
-        return {"status": "promoted", "operator_id": op_id, "lineage_depth": len(op["lineage"]),
-                "new_sharpe": cand["sharpe"]}
+        logger.info(
+            "DarwinEngine '%s': %s promoted (lineage depth %d)",
+            self.name,
+            op_id,
+            len(op["lineage"]),
+        )
+        return {
+            "status": "promoted",
+            "operator_id": op_id,
+            "lineage_depth": len(op["lineage"]),
+            "new_sharpe": cand["sharpe"],
+        }
 
     # ===== 确定性基因突变 (机制: AST 参数扰动) =============================
 
@@ -360,7 +423,11 @@ class DarwinEvolutionEngine(EngineSkeleton):
             if i == 2:
                 variant_tree = ast.fix_missing_locations(_add_nonlinear_penalty(variant_tree))
             variant_code = ast.unparse(variant_tree)
-            out.append(variant_code if variant_code != code else code + f"\n# (darwin) variant {i + 1}: no tunable literals found\n")
+            out.append(
+                variant_code
+                if variant_code != code
+                else code + f"\n# (darwin) variant {i + 1}: no tunable literals found\n"
+            )
         return out
 
     # ===== 主循环 ==========================================================
@@ -383,7 +450,7 @@ class DarwinEvolutionEngine(EngineSkeleton):
         while self._running:
             try:
                 await self._iterate_once()
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 self._last_error = f"{type(exc).__name__}: {exc}"
                 logger.exception("DarwinEngine '%s' iteration failed", self.name)
             self._iteration_count += 1
@@ -403,7 +470,9 @@ class DarwinEvolutionEngine(EngineSkeleton):
             "status": "healthy" if not self._last_error else "unhealthy",
             "details": {
                 "operators": len(self._operators),
-                "candidates": sum(1 for o in self._operators.values() if o["status"] == "CANDIDATE"),
+                "candidates": sum(
+                    1 for o in self._operators.values() if o["status"] == "CANDIDATE"
+                ),
                 "iterations": self._iteration_count,
                 "last_error": self._last_error,
             },
@@ -424,16 +493,23 @@ class DarwinEvolutionEngine(EngineSkeleton):
         if not self.state_path:
             return
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"operators": self._operators}, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(
+            json.dumps({"operators": self._operators}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         tmp.replace(self.state_path)
 
     # ===== PRD 模板 (机制) =================================================
 
     def _write_prd(
-        self, op: dict[str, Any], variants: list[str], results: list[dict],
-        best: dict[str, Any], old_sharpe: float | None,
+        self,
+        op: dict[str, Any],
+        variants: list[str],
+        results: list[dict],
+        best: dict[str, Any],
+        old_sharpe: float | None,
     ) -> Path:
-        state_dir = (self.state_path.parent if self.state_path else Path.cwd() / ".veya_darwin")
+        state_dir = self.state_path.parent if self.state_path else Path.cwd() / ".veya_darwin"
         state_dir.mkdir(parents=True, exist_ok=True)
         path = state_dir / f"prd_{op['id']}_{int(time.time())}.md"
         rows = "\n".join(
@@ -442,13 +518,13 @@ class DarwinEvolutionEngine(EngineSkeleton):
             f"{r.get('error') or '-'} |"
             for i, r in enumerate(results)
         )
-        md = f"""# 达尔文升级申请 (PRD) — {op['name']} ({op['id']})
+        md = f"""# 达尔文升级申请 (PRD) — {op["name"]} ({op["id"]})
 
 ## 背景
-- 影子测试样本: {len(op['shadow']['observations'])}
-- 平均预测准确率: {op['shadow']['accuracy_avg']}
-- 平均滑点: {op['shadow']['slippage_avg']}
-- 衰减判定: accuracy < {self.config.get('decay_accuracy_below')} 或 slippage > {self.config.get('decay_slippage_above')}
+- 影子测试样本: {len(op["shadow"]["observations"])}
+- 平均预测准确率: {op["shadow"]["accuracy_avg"]}
+- 平均滑点: {op["shadow"]["slippage_avg"]}
+- 衰减判定: accuracy < {self.config.get("decay_accuracy_below")} 或 slippage > {self.config.get("decay_slippage_above")}
 - 旧算子夏普: {old_sharpe}
 
 ## 变体回测 (并发, 隔离沙箱)
@@ -457,10 +533,10 @@ class DarwinEvolutionEngine(EngineSkeleton):
 {rows}
 
 ## 推荐
-- 胜出变体: V{results.index(best) + 1}, 夏普 **{best['sharpe']}**
+- 胜出变体: V{results.index(best) + 1}, 夏普 **{best["sharpe"]}**
 
 ## 升级与回滚
-- 批准: `POST /evolution/operators/{op['id']}/promote` → ACTIVE 原子替换, 旧代码进入 lineage (可回滚)
+- 批准: `POST /evolution/operators/{op["id"]}/promote` → ACTIVE 原子替换, 旧代码进入 lineage (可回滚)
 - 拒绝: 候选保留, ACTIVE 算子继续影子观测
 
 > 生成: DarwinEvolutionEngine (oservi) • 未经审批不触碰实盘
@@ -472,6 +548,7 @@ class DarwinEvolutionEngine(EngineSkeleton):
 # ---------------------------------------------------------------------------
 # AST 突变工具 (模块级纯函数, 便于单测)
 # ---------------------------------------------------------------------------
+
 
 def _scale_literals(tree: ast.AST, factor: float) -> ast.AST:
     """将所有数值字面量 × factor (跳过 0/1/布尔/字符串)."""
@@ -503,15 +580,26 @@ def _add_nonlinear_penalty(tree: ast.AST) -> ast.AST:
             if self._done:
                 return node
             for t in node.targets:
-                if isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant) \
-                        and isinstance(t.slice.value, str) and _SIGNAL_COL_RE.search(t.slice.value):
+                if (
+                    isinstance(t, ast.Subscript)
+                    and isinstance(t.slice, ast.Constant)
+                    and isinstance(t.slice.value, str)
+                    and _SIGNAL_COL_RE.search(t.slice.value)
+                ):
                     strength = ast.Constant(value=_PENALTY_STRENGTH)
                     one = ast.Constant(value=1.0)
                     penalty = ast.BinOp(
-                        left=one, op=ast.Sub(),
-                        right=ast.BinOp(left=strength, op=ast.Mult(),
-                                        right=ast.Call(func=ast.Name(id="abs", ctx=ast.Load()),
-                                                       args=[node.value], keywords=[])),
+                        left=one,
+                        op=ast.Sub(),
+                        right=ast.BinOp(
+                            left=strength,
+                            op=ast.Mult(),
+                            right=ast.Call(
+                                func=ast.Name(id="abs", ctx=ast.Load()),
+                                args=[node.value],
+                                keywords=[],
+                            ),
+                        ),
                     )
                     node.value = ast.BinOp(left=node.value, op=ast.Mult(), right=penalty)
                     self._done = True

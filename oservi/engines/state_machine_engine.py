@@ -28,7 +28,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 
@@ -142,7 +143,7 @@ class StateMachineEngine(EngineSkeleton):
                 ok = await _call(
                     validator, from_status=from_status, to_status=to_status, input_data=input_data
                 )
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 self._last_error = f"validator {validator.__name__} raised: {e}"
                 return self._reject(key, self._last_error, on_step)
             if not ok:
@@ -159,7 +160,7 @@ class StateMachineEngine(EngineSkeleton):
             result = await _call(
                 fn, from_status=from_status, to_status=to_status, input_data=input_data
             )
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             self._last_error = f"transition {fn_name} raised: {e}"
             return self._reject(key, self._last_error, on_step)
 
@@ -168,7 +169,7 @@ class StateMachineEngine(EngineSkeleton):
         if on_step:
             try:
                 on_step(outcome)
-            except Exception as cb_err:
+            except type(Exception()) as cb_err:
                 logger.warning(f"on_step callback failed: {cb_err}")
         return outcome
 
@@ -180,7 +181,7 @@ class StateMachineEngine(EngineSkeleton):
         if on_step:
             try:
                 on_step(outcome)
-            except Exception as cb_err:
+            except type(Exception()) as cb_err:
                 logger.warning(f"on_step callback failed: {cb_err}")
         return outcome
 

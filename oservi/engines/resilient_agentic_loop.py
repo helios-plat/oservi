@@ -141,7 +141,7 @@ class ResilientAgenticLoop(EngineSkeleton):
         try:
             result = await self._call(tool, **args)
             return result, False
-        except Exception as exc:  # noqa: BLE001 — tool failure becomes is_error
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             return f"ERROR: {type(exc).__name__}: {exc}", True
 
     async def _call(self, fn: Callable[..., Any], **kwargs: Any) -> Any:

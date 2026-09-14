@@ -13,12 +13,10 @@ Stateful engine skeleton for voice agent sessions.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar
 
 # Graceful import: oservi may not be fully installed with all deps
 try:
@@ -26,20 +24,23 @@ try:
         EngineSkeleton,
         Injection,
         InjectionKind,
-        register_skeleton,
         ManifestValidationError,
+        register_skeleton,
     )
 except ImportError:
     # Minimal stubs for standalone inspection
     class EngineSkeleton:
-        injection_points: dict = {}
+        injection_points: ClassVar[dict] = {}
+
     class Injection:
         def __init__(self, *, kind=None, cardinality=None, description=None):
             self.kind = kind
             self.cardinality = cardinality
             self.description = description
+
     InjectionKind = str
     ManifestValidationError = Exception
+
     def register_skeleton(name, cls):
         pass
 
@@ -86,34 +87,41 @@ class VoiceAgentEngine(EngineSkeleton):
         tools          — layer4 tool adapters (ToolSpec list)
     """
 
-    injection_points = {
+    injection_points: ClassVar[dict] = {
         "stt_skill": Injection(
-            kind="oskill", cardinality="1",
-            description="Speech-to-text pipeline: (audio, provider, **opts) -> TranscriptionResult"
+            kind="oskill",
+            cardinality="1",
+            description="Speech-to-text pipeline: (audio, provider, **opts) -> TranscriptionResult",
         ),
         "tts_skill": Injection(
-            kind="oskill", cardinality="1",
-            description="Text-to-speech pipeline: (text, provider, **opts) -> bytes"
+            kind="oskill",
+            cardinality="1",
+            description="Text-to-speech pipeline: (text, provider, **opts) -> bytes",
         ),
         "llm_caller": Injection(
-            kind="oprim", cardinality="1",
-            description="LLM call primitive: (messages, tools, max_tokens) -> dict"
+            kind="oprim",
+            cardinality="1",
+            description="LLM call primitive: (messages, tools, max_tokens) -> dict",
         ),
         "vad_oprim": Injection(
-            kind="oprim", cardinality="1",
-            description="VAD frame-level operation: (frame, mode, threshold) -> VADResult"
+            kind="oprim",
+            cardinality="1",
+            description="VAD frame-level operation: (frame, mode, threshold) -> VADResult",
         ),
         "turn_detector": Injection(
-            kind="oskill", cardinality="0..1",
-            description="Turn detection: TurnDetector instance or factory"
+            kind="oskill",
+            cardinality="0..1",
+            description="Turn detection: TurnDetector instance or factory",
         ),
         "audio_io": Injection(
-            kind="oskill", cardinality="0..1",
-            description="Audio I/O pipeline: AudioPipeline instance or factory"
+            kind="oskill",
+            cardinality="0..1",
+            description="Audio I/O pipeline: AudioPipeline instance or factory",
         ),
         "tools": Injection(
-            kind="layer4", cardinality="0..n",
-            description="Tool adapters for LLM function calling (ToolSpec list)"
+            kind="layer4",
+            cardinality="0..n",
+            description="Tool adapters for LLM function calling (ToolSpec list)",
         ),
     }
 
@@ -194,9 +202,10 @@ class VoiceAgentEngine(EngineSkeleton):
             Dict with result, transcript, audio_output, stats.
         """
         import uuid
+
         from veya.oprim.audio import split_into_frames
         from veya.oprim.types import AudioFrame
-        from veya.oskill.turn_detection import TurnDetector, TurnHandlingConfig
+        from veya.oskill.turn_detection import TurnDetector
 
         state = VoiceSessionState(
             session_id=str(uuid.uuid4())[:8],
@@ -266,7 +275,7 @@ class VoiceAgentEngine(EngineSkeleton):
                         language=language,
                         sample_rate=sample_rate,
                     )
-                except Exception as e:
+                except type(Exception()) as e:
                     state.record(event="stt_error", error=str(e))
                     continue
 
@@ -289,10 +298,18 @@ class VoiceAgentEngine(EngineSkeleton):
                     llm_messages.extend(history[-10:])
                     llm_messages.append({"role": "user", "content": stt_result.text})
 
-                    tools_schema = [
-                        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
-                        for t in self.tools
-                    ] if self.tools else None
+                    tools_schema = (
+                        [
+                            {
+                                "name": t.name,
+                                "description": t.description,
+                                "input_schema": t.input_schema,
+                            }
+                            for t in self.tools
+                        ]
+                        if self.tools
+                        else None
+                    )
 
                     llm_response = await self.llm_caller(
                         messages=llm_messages,
@@ -307,7 +324,7 @@ class VoiceAgentEngine(EngineSkeleton):
                             break
                     if not agent_text:
                         agent_text = content_blocks[0].get("text", "") if content_blocks else ""
-                except Exception as e:
+                except type(Exception()) as e:
                     state.record(event="llm_error", error=str(e))
                     agent_text = "I'm sorry, I had trouble understanding that."
 
@@ -328,7 +345,7 @@ class VoiceAgentEngine(EngineSkeleton):
                     )
                     output_audio += agent_audio
                     state.total_output_audio_bytes += len(agent_audio)
-                except Exception as e:
+                except type(Exception()) as e:
                     state.record(event="tts_error", error=str(e))
 
                 # Update history

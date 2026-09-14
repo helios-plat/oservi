@@ -24,7 +24,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -135,8 +136,10 @@ class McpBridgeEngine(EngineSkeleton):
                 else:
                     reg_result = raw
             # registry returns index or callable reference
-            primitive_idx = reg_result.get("primitive_idx", 0) if isinstance(reg_result, dict) else 0
-        except Exception as e:
+            primitive_idx = (
+                reg_result.get("primitive_idx", 0) if isinstance(reg_result, dict) else 0
+            )
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             logger.warning(f"McpBridgeEngine registry lookup failed for '{tool_name}': {e}")
             primitive_idx = 0
 
@@ -157,7 +160,7 @@ class McpBridgeEngine(EngineSkeleton):
                     result = raw
             self._call_count += 1
             return {"status": "ok", "result": result, "tool_name": tool_name}
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             self._last_error = f"{type(e).__name__}: {e}"
             logger.warning(f"McpBridgeEngine call failed for '{tool_name}': {e}")
             return {"status": "error", "result": None, "tool_name": tool_name, "error": str(e)}
@@ -174,7 +177,7 @@ class McpBridgeEngine(EngineSkeleton):
                 else:
                     result = raw
             return {"status": "connected", "result": result}
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             self._last_error = f"{type(e).__name__}: {e}"
             logger.warning(f"McpBridgeEngine connect failed: {e}")
             return {"status": "error", "error": str(e)}

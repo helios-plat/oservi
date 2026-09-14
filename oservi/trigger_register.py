@@ -29,8 +29,7 @@ TRIGGERS_FILE = Path.home() / ".veya" / "triggers.json"
 class TriggerRegistry:
     """触发器注册表: 绑定表 (JSON 持久化) + event 订阅 + 触发审计。"""
 
-    def __init__(self, event_bus: EventBus | None = None,
-                 triggers_file: str = "") -> None:
+    def __init__(self, event_bus: EventBus | None = None, triggers_file: str = "") -> None:
         self.bus = event_bus or EventBus()
         self._file = Path(triggers_file or TRIGGERS_FILE)
         self._bindings: dict[str, dict[str, Any]] = {}
@@ -48,13 +47,20 @@ class TriggerRegistry:
 
     def _save(self) -> None:
         self._file.parent.mkdir(parents=True, exist_ok=True)
-        self._file.write_text(json.dumps(self._bindings, ensure_ascii=False, indent=2),
-                              encoding="utf-8")
+        self._file.write_text(
+            json.dumps(self._bindings, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     # ── 注册 ──────────────────────────────────────────────────────────
-    def register(self, kind: str, spec: str, workflow_id: str, *,
-                 binding: dict[str, Any] | None = None,
-                 callback: Callable[[dict[str, Any]], Any] | None = None) -> dict[str, Any]:
+    def register(
+        self,
+        kind: str,
+        spec: str,
+        workflow_id: str,
+        *,
+        binding: dict[str, Any] | None = None,
+        callback: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> dict[str, Any]:
         """统一注册: cron/webhook/event → 绑定条目。"""
         if kind not in TRIGGER_KINDS:
             raise ValueError(f"未知触发器类型: {kind}; 可选 {TRIGGER_KINDS}")
@@ -89,8 +95,8 @@ class TriggerRegistry:
 
     def _make_handler(self, binding_id: str) -> Callable[[Event], None]:
         def handler(event: Event) -> None:
-            self.trigger(binding_id, {"event": event.type,
-                                      "payload": event.payload or {}})
+            self.trigger(binding_id, {"event": event.type, "payload": event.payload or {}})
+
         return handler
 
     # ── 触发 ──────────────────────────────────────────────────────────
@@ -111,14 +117,19 @@ class TriggerRegistry:
             from oprim._audit_emit import AuditEvent, JsonlSink
 
             sink = JsonlSink(str(Path.home() / ".veya" / "audit" / "trigger.jsonl"))
-            sink.write(AuditEvent(
-                event_type="decide",
-                trace_id=f"trg_{binding_id}",
-                inputs={"binding_id": binding_id, "kind": binding.get("kind"),
-                        "workflow_id": binding.get("workflow_id")},
-                decision={"triggered": True, "payload_keys": list(payload.keys())},
-            ))
-        except Exception:
+            sink.write(
+                AuditEvent(
+                    event_type="decide",
+                    trace_id=f"trg_{binding_id}",
+                    inputs={
+                        "binding_id": binding_id,
+                        "kind": binding.get("kind"),
+                        "workflow_id": binding.get("workflow_id"),
+                    },
+                    decision={"triggered": True, "payload_keys": list(payload.keys())},
+                )
+            )
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
             import logging
 
             logging.getLogger("veya.trigger").warning("audit failed", exc_info=True)
@@ -126,13 +137,20 @@ class TriggerRegistry:
         if callback is not None:
             try:
                 result = callback(payload)
-                return {"ok": True, "binding_id": binding_id,
-                        "workflow_id": binding.get("workflow_id"),
-                        "callback": str(result)[:500] if result else "ok"}
-            except Exception as e:  # noqa: BLE001
+                return {
+                    "ok": True,
+                    "binding_id": binding_id,
+                    "workflow_id": binding.get("workflow_id"),
+                    "callback": str(result)[:500] if result else "ok",
+                }
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 return {"ok": False, "binding_id": binding_id, "error": str(e)[:500]}
-        return {"ok": True, "binding_id": binding_id,
-                "workflow_id": binding.get("workflow_id"), "dispatched": True}
+        return {
+            "ok": True,
+            "binding_id": binding_id,
+            "workflow_id": binding.get("workflow_id"),
+            "dispatched": True,
+        }
 
     # ── 管理 ──────────────────────────────────────────────────────────
     def list(self) -> list[dict[str, Any]]:

@@ -29,7 +29,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -71,7 +72,7 @@ class ActionPlannerEngine(EngineSkeleton):
         )
     """
 
-    injection_points = {
+    injection_points: ClassVar[dict] = {
         "llm_provider": Injection(
             kind="obase",
             cardinality="1",
@@ -146,11 +147,11 @@ class ActionPlannerEngine(EngineSkeleton):
                 if self.on_plan_done:
                     try:
                         self.on_plan_done(result)
-                    except Exception as e:
+                    except type(Exception()) as e:
                         logger.warning(f"on_plan_done callback failed: {e}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 self._last_error = f"{type(e).__name__}: {e}"
                 logger.exception(f"ActionPlannerEngine '{self.name}' plan failed")
 
@@ -166,7 +167,7 @@ class ActionPlannerEngine(EngineSkeleton):
                 if asyncio.iscoroutine(raw):
                     raw = await raw
                 context = str(raw) if raw else ""
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 logger.warning(f"RAG retrieval failed: {e}")
 
         # LLM 生成行动步骤
@@ -197,7 +198,7 @@ class ActionPlannerEngine(EngineSkeleton):
             if asyncio.iscoroutine(result):
                 result = await result
             return result if isinstance(result, list) else []
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             logger.warning(f"ActionPlannerEngine LLM plan generation failed: {e}")
             return []
 
@@ -228,9 +229,9 @@ class ActionPlannerEngine(EngineSkeleton):
                     "result": result,
                     "attempt": attempt,
                 }
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 error = f"timeout after {timeout}s"
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 error = f"{type(e).__name__}: {e}"
             logger.warning(
                 f"Step '{plugin_id}' attempt {attempt + 1}/{max_retries + 1} failed: {error}"

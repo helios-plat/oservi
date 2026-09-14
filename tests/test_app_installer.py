@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
 
 from oservi import AppInstallerEngine, list_skeletons
-
 
 # ===== Fake injectables =====
 
@@ -17,7 +15,7 @@ def fake_catalog(*, app_id):
         "compose_file": f"/apps/{app_id}/docker-compose.yml",
         "env_vars": {"APP_PORT": "8080"},
         "routes": [{"host": f"{app_id}.example.com", "upstream": "localhost:8080"}],
-        "service_url": f"http://localhost:8080/health",
+        "service_url": "http://localhost:8080/health",
     }
 
 
@@ -53,16 +51,16 @@ def fake_verify_health_fail(*, service_url, retries):
 
 
 def _make_engine(**overrides):
-    defaults = dict(
-        catalog_fetch=fake_catalog,
-        compose_up=fake_compose_up,
-        compose_pull=fake_compose_pull,
-        caddy_route_add=fake_caddy_route_add,
-        verify_health=fake_verify_health_ok,
-        trigger={"on_interval": 0},
-        config={},
-        name="test-installer",
-    )
+    defaults = {
+        "catalog_fetch": fake_catalog,
+        "compose_up": fake_compose_up,
+        "compose_pull": fake_compose_pull,
+        "caddy_route_add": fake_caddy_route_add,
+        "verify_health": fake_verify_health_ok,
+        "trigger": {"on_interval": 0},
+        "config": {},
+        "name": "test-installer",
+    }
     defaults.update(overrides)
     return AppInstallerEngine(**defaults)
 

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
+
 import pytest
 
 from oservi import AgenticLoopEngine, list_skeletons
 
-
 # ===== Fake injectables =====
+
 
 def fake_llm_caller(*, messages, tools, config):
     return {"content": "done", "cost_usd": 0.01}
@@ -40,21 +40,22 @@ def fake_retrieval(*, query):
 
 
 def _make_engine(**overrides):
-    defaults = dict(
-        llm_caller=fake_llm_caller,
-        tools=[fake_tool_a],
-        turn_handler=fake_turn_handler,
-        retrieval=None,
-        layer4_ui=None,
-        trigger={"on_demand": True},
-        config={},
-        name="test-loop",
-    )
+    defaults = {
+        "llm_caller": fake_llm_caller,
+        "tools": [fake_tool_a],
+        "turn_handler": fake_turn_handler,
+        "retrieval": None,
+        "layer4_ui": None,
+        "trigger": {"on_demand": True},
+        "config": {},
+        "name": "test-loop",
+    }
     defaults.update(overrides)
     return AgenticLoopEngine(**defaults)
 
 
 # ===== Tests =====
+
 
 def test_agentic_loop_registered():
     assert "agentic_loop" in list_skeletons()
@@ -157,10 +158,12 @@ def test_run_turn_with_context():
         return {"messages": messages}
 
     engine = _make_engine(turn_handler=handler_captures_context)
-    asyncio.run(engine.run_turn(
-        messages=[{"role": "user", "content": "ctx"}],
-        context={"session_id": "abc"},
-    ))
+    asyncio.run(
+        engine.run_turn(
+            messages=[{"role": "user", "content": "ctx"}],
+            context={"session_id": "abc"},
+        )
+    )
     assert received_context.get("session_id") == "abc"
 
 

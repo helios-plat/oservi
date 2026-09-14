@@ -44,13 +44,13 @@ async_step_ok.__module__ = "omodul.fake"
 
 
 def _make_engine(**overrides):
-    defaults = dict(
-        steps=[step_ok],
-        compensations=None,
-        trigger={"on_demand": True},
-        config={},
-        name="test-saga",
-    )
+    defaults = {
+        "steps": [step_ok],
+        "compensations": None,
+        "trigger": {"on_demand": True},
+        "config": {},
+        "name": "test-saga",
+    }
     defaults.update(overrides)
     return SagaComposerEngine(**defaults)
 

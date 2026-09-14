@@ -16,84 +16,100 @@ Phase 1:
 引擎骨架准入 5 红线见 docs/GOVERNANCE.md
 """
 
+# 引擎自动导入触发 register_skeleton
+from oservi.engines import alerter as _alerter  # noqa: F401
+from oservi.engines import boss_orchestration as _boss_orchestration
+from oservi.engines import bulk_export_worker as _bulk_export_worker
+from oservi.engines import bulk_import_worker as _bulk_import_worker
+from oservi.engines import cron_scheduler_engine as _cron_scheduler_engine
+from oservi.engines import event_webhook_dispatcher as _event_webhook_dispatcher
+from oservi.engines import feed_tracker as _feed_tracker  # noqa: F401
+from oservi.engines import mcp_bridge as _mcp_bridge  # noqa: F401
+from oservi.engines import mcp_registry as _mcp_registry
+from oservi.engines import provider_router as _provider_router
+from oservi.engines import researcher as _researcher
+from oservi.engines import resilient_agentic_loop as _resilient_agentic_loop  # noqa: F401
+from oservi.engines import saga_composer as _saga_composer
+from oservi.engines import sequential_composer as _sequential_composer
+from oservi.engines import spec_driven_goal as _spec_driven_goal  # noqa: F401
+from oservi.engines import state_machine_engine as _state_machine_engine
+from oservi.engines import subagent_orchestrator as _subagent_orchestrator
+from oservi.engines import tool_governance as _tool_governance  # noqa: F401
+from oservi.engines import veya_evolution as _veya_evolution
+from oservi.engines import vision_agent as _vision_agent
+from oservi.engines import voice_agent as _voice_agent
+
+_ENGINE_MODULES = (
+    _boss_orchestration,
+    _bulk_export_worker,
+    _bulk_import_worker,
+    _cron_scheduler_engine,
+    _event_webhook_dispatcher,
+    _mcp_registry,
+    _provider_router,
+    _researcher,
+    _saga_composer,
+    _sequential_composer,
+    _state_machine_engine,
+    _subagent_orchestrator,
+    _veya_evolution,
+    _vision_agent,
+    _voice_agent,
+)
 from oservi.engines._base import (
     EngineSkeleton,
     Injection,
-    register_skeleton,
     get_skeleton,
     list_skeletons,
+    register_skeleton,
 )
-
-# 引擎自动导入触发 register_skeleton
-from oservi.engines import alerter as _alerter  # noqa: F401
-from oservi.engines import researcher as _researcher  # noqa: F401
-from oservi.engines import feed_tracker as _feed_tracker  # noqa: F401
-from oservi.engines import sequential_composer as _sequential_composer  # noqa: F401
-from oservi.engines import subagent_orchestrator as _subagent_orchestrator  # noqa: F401
-from oservi.engines import mcp_bridge as _mcp_bridge  # noqa: F401
-from oservi.engines import saga_composer as _saga_composer  # noqa: F401
-from oservi.engines import state_machine_engine as _state_machine_engine  # noqa: F401
-from oservi.engines import event_webhook_dispatcher as _event_webhook_dispatcher  # noqa: F401
-from oservi.engines import cron_scheduler_engine as _cron_scheduler_engine  # noqa: F401
-from oservi.engines import bulk_import_worker as _bulk_import_worker  # noqa: F401
-from oservi.engines import bulk_export_worker as _bulk_export_worker  # noqa: F401
-from oservi.engines import voice_agent as _voice_agent  # noqa: F401
-from oservi.engines import vision_agent as _vision_agent  # noqa: F401
-from oservi.engines import resilient_agentic_loop as _resilient_agentic_loop  # noqa: F401
-from oservi.engines import veya_evolution as _veya_evolution  # noqa: F401
-from oservi.engines import spec_driven_goal as _spec_driven_goal  # noqa: F401
-from oservi.engines import boss_orchestration as _boss_orchestration  # noqa: F401
-from oservi.engines import provider_router as _provider_router  # noqa: F401
-from oservi.engines import tool_governance as _tool_governance  # noqa: F401
-from oservi.engines import mcp_registry as _mcp_registry  # noqa: F401
-
 from oservi.engines.alerter import AlerterEngine
-from oservi.engines.researcher import ResearcherEngine
-from oservi.engines.feed_tracker import FeedTrackerEngine
-from oservi.engines.sequential_composer import SequentialComposerEngine
-from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
-from oservi.engines.mcp_bridge import McpBridgeEngine
-from oservi.engines.saga_composer import SagaComposerEngine
-from oservi.engines.state_machine_engine import StateMachineEngine
-from oservi.engines.event_webhook_dispatcher import EventWebhookDispatcherEngine
-from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
-from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
-from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
-from oservi.engines.voice_agent import VoiceAgentEngine
-from oservi.engines.vision_agent import VisionAgentEngine
-from oservi.engines.resilient_agentic_loop import ResilientAgenticLoop
-from oservi.engines.veya_evolution import VeyaEvolutionEngine
-from oservi.engines.spec_driven_goal import SpecDrivenGoalEngine
 from oservi.engines.boss_orchestration import BossOrchestrationEngine
-from oservi.engines.provider_router import ProviderRouterEngine
-from oservi.engines.tool_governance import ToolGovernanceEngine
+from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
+from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
+from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
+from oservi.engines.event_webhook_dispatcher import EventWebhookDispatcherEngine
+from oservi.engines.feed_tracker import FeedTrackerEngine
+from oservi.engines.mcp_bridge import McpBridgeEngine
 from oservi.engines.mcp_registry import MCPRegistryEngine
+from oservi.engines.provider_router import ProviderRouterEngine
+from oservi.engines.researcher import ResearcherEngine
+from oservi.engines.resilient_agentic_loop import ResilientAgenticLoop
+from oservi.engines.saga_composer import SagaComposerEngine
+from oservi.engines.sequential_composer import SequentialComposerEngine
+from oservi.engines.spec_driven_goal import SpecDrivenGoalEngine
+from oservi.engines.state_machine_engine import StateMachineEngine
+from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
+from oservi.engines.tool_governance import ToolGovernanceEngine
+from oservi.engines.veya_evolution import VeyaEvolutionEngine
+from oservi.engines.vision_agent import VisionAgentEngine
+from oservi.engines.voice_agent import VoiceAgentEngine
 
 __all__ = [
+    "AlerterEngine",
+    "BossOrchestrationEngine",
+    "BulkExportWorkerEngine",
+    "BulkImportWorkerEngine",
+    "CronSchedulerEngine",
     "EngineSkeleton",
+    "EventWebhookDispatcherEngine",
+    "FeedTrackerEngine",
     "Injection",
-    "register_skeleton",
+    "MCPRegistryEngine",
+    "McpBridgeEngine",
+    "ProviderRouterEngine",
+    "ResearcherEngine",
+    "ResilientAgenticLoop",
+    "SagaComposerEngine",
+    "SequentialComposerEngine",
+    "SpecDrivenGoalEngine",
+    "StateMachineEngine",
+    "SubagentOrchestratorEngine",
+    "ToolGovernanceEngine",
+    "VeyaEvolutionEngine",
+    "VisionAgentEngine",
+    "VoiceAgentEngine",
     "get_skeleton",
     "list_skeletons",
-    "AlerterEngine",
-    "ResearcherEngine",
-    "FeedTrackerEngine",
-    "SequentialComposerEngine",
-    "SubagentOrchestratorEngine",
-    "McpBridgeEngine",
-    "SagaComposerEngine",
-    "StateMachineEngine",
-    "EventWebhookDispatcherEngine",
-    "CronSchedulerEngine",
-    "BulkImportWorkerEngine",
-    "BulkExportWorkerEngine",
-    "VoiceAgentEngine",
-    "VisionAgentEngine",
-    "ResilientAgenticLoop",
-    "VeyaEvolutionEngine",
-    "SpecDrivenGoalEngine",
-    "BossOrchestrationEngine",
-    "ProviderRouterEngine",
-    "ToolGovernanceEngine",
-    "MCPRegistryEngine",
+    "register_skeleton",
 ]

@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
 
 from oservi import ActionPlannerEngine, list_skeletons
-
 
 # ===== Fake injectables =====
 

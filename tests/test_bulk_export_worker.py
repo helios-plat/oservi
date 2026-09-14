@@ -64,14 +64,14 @@ def make_uploader():
 
 def _make_engine(**overrides):
     uploader = make_uploader()
-    defaults = dict(
-        fetcher=sync_fetcher,
-        formatter=csv_formatter,
-        uploader=uploader.upload,
-        trigger={"on_signal": "bulk_export.requested"},
-        config={},
-        name="test-exporter",
-    )
+    defaults = {
+        "fetcher": sync_fetcher,
+        "formatter": csv_formatter,
+        "uploader": uploader.upload,
+        "trigger": {"on_signal": "bulk_export.requested"},
+        "config": {},
+        "name": "test-exporter",
+    }
     defaults.update(overrides)
     return BulkExportWorkerEngine(**defaults), uploader
 

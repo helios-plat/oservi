@@ -40,12 +40,12 @@ task_raises.__module__ = "omodul.fake"
 
 def _make_engine(**overrides):
     recorder: list = []
-    defaults = dict(
-        tasks=[make_task(recorder)],
-        trigger={"on_cron": "0 3 * * *"},
-        config={},
-        name="test-cron",
-    )
+    defaults = {
+        "tasks": [make_task(recorder)],
+        "trigger": {"on_cron": "0 3 * * *"},
+        "config": {},
+        "name": "test-cron",
+    }
     defaults.update(overrides)
     return CronSchedulerEngine(**defaults), recorder
 

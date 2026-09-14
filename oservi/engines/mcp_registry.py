@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from obase.tool_governance import MCPServerSpec
+
 from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 
 
 class MCPRegistryEngine(EngineSkeleton):
     """Manage versioned MCP registrations through the injected obase registry."""
 
-    injection_points: dict[str, Injection] = {  # noqa: RUF012
+    injection_points: ClassVar[dict] = {
         "registry": Injection("obase", "1", "McpClientRegistry-compatible registry"),
     }
     trigger_mode: str = "on_demand"

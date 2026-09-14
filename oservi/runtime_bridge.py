@@ -38,6 +38,7 @@ __all__ = [
 # 协议
 # =========================================================================
 
+
 @runtime_checkable
 class AgentRuntime(Protocol):
     """统一运行时协议 — 上层 (编排/CLI/MCP) 零感知差异。
@@ -55,13 +56,18 @@ class AgentRuntime(Protocol):
     async def health(self) -> dict: ...
 
 
-def register_runtime(adapter: AgentRuntime,
-                     registry: AgentRegistry | None = None) -> dict[str, Any]:
+def register_runtime(
+    adapter: AgentRuntime, registry: AgentRegistry | None = None
+) -> dict[str, Any]:
     """注册适配器到 agent_registry (runtime 类型, 幂等)。"""
     reg = registry or AgentRegistry()
     try:
-        reg.register("runtime", adapter.name, adapter,
-                     desc=getattr(adapter, "description", adapter.__class__.__doc__ or ""))
+        reg.register(
+            "runtime",
+            adapter.name,
+            adapter,
+            desc=getattr(adapter, "description", adapter.__class__.__doc__ or ""),
+        )
         return {"registered": adapter.name}
     except RegistryConflictError:
         return {"skipped": adapter.name}
@@ -110,8 +116,12 @@ class PrimeAgentRuntime:
         if self._harness is None:
             return unavailable(self.name, _PRIME_HINT)
         self._started_at = time.time()
-        return {"ok": True, "runtime": self.name, "version": "harness",
-                "module": getattr(self._harness, "__name__", "?")}
+        return {
+            "ok": True,
+            "runtime": self.name,
+            "version": "harness",
+            "module": getattr(self._harness, "__name__", "?"),
+        }
 
     async def dispatch(self, task: str, **kwargs: Any) -> dict[str, Any]:
         if self._harness is None:
@@ -122,7 +132,7 @@ class PrimeAgentRuntime:
             if result is None:
                 return unavailable(self.name, "harness 无 run() 入口")
             return {"ok": True, "runtime": self.name, "output": str(result)[:4000]}
-        except Exception as e:  # noqa: BLE001
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             return {"ok": False, "runtime": self.name, "error": str(e)[:2000]}
 
     async def invoke(self, prompt: str, **kwargs: Any) -> dict[str, Any]:
@@ -131,18 +141,27 @@ class PrimeAgentRuntime:
     async def lifecycle(self, action: str) -> dict[str, Any]:
         if action in ("health", "status"):
             return await self.health()
-        return {"ok": True, "runtime": self.name, "action": action,
-                "note": "prime-agent v1 无状态 (进程内按需加载)"}
+        return {
+            "ok": True,
+            "runtime": self.name,
+            "action": action,
+            "note": "prime-agent v1 无状态 (进程内按需加载)",
+        }
 
     async def health(self) -> dict[str, Any]:
         connected = _resolve_prime_harness() is not None
-        return {"ok": connected, "runtime": self.name, "connected": connected,
-                "uptime_s": time.time() - self._started_at if self._started_at else 0}
+        return {
+            "ok": connected,
+            "runtime": self.name,
+            "connected": connected,
+            "uptime_s": time.time() - self._started_at if self._started_at else 0,
+        }
 
 
 # =========================================================================
 # L2 — pi (CLI 桥, TS/Bun → subprocess)
 # =========================================================================
+
 
 class PiBridgeRuntime:
     """pi (pi-coding-agent) CLI 桥: 极简/类型安全工具链, 统一多厂商 API。"""
@@ -160,8 +179,10 @@ class PiBridgeRuntime:
     async def _run(self, args: list[str], timeout_s: float = 600.0) -> dict[str, Any]:
         assert self._bin is not None
         proc = await asyncio.create_subprocess_exec(
-            self._bin, *args,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            self._bin,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
@@ -172,8 +193,12 @@ class PiBridgeRuntime:
         out = stdout.decode(errors="replace")
         err = stderr.decode(errors="replace")
         if proc.returncode != 0:
-            return {"ok": False, "runtime": self.name,
-                    "error": err[-2000:] or f"exit={proc.returncode}", "output": out[-2000:]}
+            return {
+                "ok": False,
+                "runtime": self.name,
+                "error": err[-2000:] or f"exit={proc.returncode}",
+                "output": out[-2000:],
+            }
         return {"ok": True, "runtime": self.name, "output": out[-4000:]}
 
     async def init(self, config: dict | None = None) -> dict[str, Any]:
@@ -182,8 +207,7 @@ class PiBridgeRuntime:
             return unavailable(self.name, "pi CLI 未安装 (npm i -g @pi-coding/pi 或官方安装脚本)")
         r = await self._run(["--version"], timeout_s=15)
         self._version = r.get("output", "").strip() or "unknown"
-        return {"ok": True, "runtime": self.name, "version": self._version,
-                "bin": self._bin}
+        return {"ok": True, "runtime": self.name, "version": self._version, "bin": self._bin}
 
     async def dispatch(self, task: str, **kwargs: Any) -> dict[str, Any]:
         if self._bin is None:
@@ -200,13 +224,21 @@ class PiBridgeRuntime:
     async def lifecycle(self, action: str) -> dict[str, Any]:
         if action in ("health", "status"):
             return await self.health()
-        return {"ok": True, "runtime": self.name, "action": action,
-                "note": "pi bridge v1 按需子进程 (无常驻 daemon)"}
+        return {
+            "ok": True,
+            "runtime": self.name,
+            "action": action,
+            "note": "pi bridge v1 按需子进程 (无常驻 daemon)",
+        }
 
     async def health(self) -> dict[str, Any]:
         ok = self._find_bin() is not None
-        return {"ok": ok, "runtime": self.name,
-                "bin": self._find_bin(), "version": self._version or None}
+        return {
+            "ok": ok,
+            "runtime": self.name,
+            "bin": self._find_bin(),
+            "version": self._version or None,
+        }
 
 
 # =========================================================================
@@ -256,7 +288,7 @@ class AgentScopeBridgeRuntime:
             topic, payload = self._translate_event(ascope_event)
             event_bus.publish(topic, payload)
             return {"ok": True, "topic": topic}
-        except Exception as e:  # noqa: BLE001
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             return {"ok": False, "error": f"event_bus 发布失败: {e}"}
 
     async def init(self, config: dict | None = None) -> dict[str, Any]:
@@ -276,9 +308,12 @@ class AgentScopeBridgeRuntime:
                 return unavailable(self.name, "agentscope 无 Agent 入口 (版本差异)")
             agent = agent_cls(name=f"veya-{int(time.time())}")
             reply = agent(task)
-            return {"ok": True, "runtime": self.name,
-                    "output": str(getattr(reply, "content", reply))[:4000]}
-        except Exception as e:  # noqa: BLE001
+            return {
+                "ok": True,
+                "runtime": self.name,
+                "output": str(getattr(reply, "content", reply))[:4000],
+            }
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             return {"ok": False, "runtime": self.name, "error": str(e)[:2000]}
 
     async def invoke(self, prompt: str, **kwargs: Any) -> dict[str, Any]:
@@ -287,13 +322,21 @@ class AgentScopeBridgeRuntime:
     async def lifecycle(self, action: str) -> dict[str, Any]:
         if action in ("health", "status"):
             return await self.health()
-        return {"ok": True, "runtime": self.name, "action": action,
-                "note": "agentscope bridge v1 按需实例 (无平台常驻)"}
+        return {
+            "ok": True,
+            "runtime": self.name,
+            "action": action,
+            "note": "agentscope bridge v1 按需实例 (无平台常驻)",
+        }
 
     async def health(self) -> dict[str, Any]:
         connected = self._load() is not None
-        return {"ok": connected, "runtime": self.name, "connected": connected,
-                "event_map": _EVENT_MAP}
+        return {
+            "ok": connected,
+            "runtime": self.name,
+            "connected": connected,
+            "event_map": _EVENT_MAP,
+        }
 
 
 # =========================================================================
@@ -301,8 +344,8 @@ class AgentScopeBridgeRuntime:
 # =========================================================================
 
 ALL_RUNTIMES: list[AgentRuntime] = [
-    PrimeAgentRuntime(),      # L1 内核
-    PiBridgeRuntime(),        # L2 工具链
+    PrimeAgentRuntime(),  # L1 内核
+    PiBridgeRuntime(),  # L2 工具链
     AgentScopeBridgeRuntime(),  # L3 平台
 ]
 

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+
 import pytest
 
 from oservi import list_skeletons
 from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
 
-
 # ===== Fake injectables =====
+
 
 def fake_subagent_runner(*, task, config):
     return {"done": True, "task_id": task.get("id"), "cost_usd": 0.05}
@@ -32,19 +33,20 @@ def fake_scheduler(*, tasks):
 
 
 def _make_engine(**overrides):
-    defaults = dict(
-        subagent_runner=fake_subagent_runner,
-        llm_caller=fake_llm_caller,
-        scheduler=None,
-        trigger={"on_demand": True},
-        config={},
-        name="test-orchestrator",
-    )
+    defaults = {
+        "subagent_runner": fake_subagent_runner,
+        "llm_caller": fake_llm_caller,
+        "scheduler": None,
+        "trigger": {"on_demand": True},
+        "config": {},
+        "name": "test-orchestrator",
+    }
     defaults.update(overrides)
     return SubagentOrchestratorEngine(**defaults)
 
 
 # ===== Tests =====
+
 
 def test_subagent_orchestrator_registered():
     assert "subagent_orchestrator" in list_skeletons()

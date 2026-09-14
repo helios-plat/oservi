@@ -51,7 +51,7 @@ class LoopStats:
 class CompletionReport:
     goal_id: str
     completed: bool
-    status: str                 # completed | max_rounds | max_hours | quota_paused
+    status: str  # completed | max_rounds | max_hours | quota_paused
     rounds: int
     cost_usd: float = 0.0
     gates_resolved: int = 0
@@ -61,10 +61,13 @@ class CompletionReport:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "goal_id": self.goal_id, "completed": self.completed,
-            "status": self.status, "rounds": self.rounds,
+            "goal_id": self.goal_id,
+            "completed": self.completed,
+            "status": self.status,
+            "rounds": self.rounds,
             "cost_usd": round(self.cost_usd, 4),
-            "gates_resolved": self.gates_resolved, "gates_rejected": self.gates_rejected,
+            "gates_resolved": self.gates_resolved,
+            "gates_rejected": self.gates_rejected,
             "restarts": self.restarts,
             "note": self.note,
         }
@@ -96,13 +99,11 @@ class GoalDrivenLoop:
         """每轮心跳: 事件溯源持久化 + 统计。"""
         self.stats.last_heartbeat = time.time()
         try:
-            await self.driver.kernel.append(
-                EVENT_HEARTBEAT, {"loop": str(uuid.uuid4())[:8]})
-        except Exception:  # noqa: BLE001 - 心跳失败不阻断 (统计仍更新)
+            await self.driver.kernel.append(EVENT_HEARTBEAT, {"loop": str(uuid.uuid4())[:8]})
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
             import logging
 
-            logging.getLogger("veya.goal_driven").warning(
-                "heartbeat append failed", exc_info=True)
+            logging.getLogger("veya.goal_driven").warning("heartbeat append failed", exc_info=True)
         if self.on_heartbeat is not None:
             self.on_heartbeat(self.driver.goal_id)
 
@@ -130,7 +131,7 @@ class GoalDrivenLoop:
                 continue
             try:
                 passed, note = await self.verifier(kernel, todo_id)
-            except Exception as exc:  # noqa: BLE001 - 验证器失败按不达标
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                 passed, note = False, f"verifier error: {exc}"
             if passed:
                 self.stats.gates_resolved += 1
@@ -154,44 +155,58 @@ class GoalDrivenLoop:
             kernel = self.driver.kernel
             goal = kernel.goal
             if goal is None:
-                return CompletionReport(goal_id, False, "no_goal",
-                                        self.stats.rounds, note="goal 未初始化")
+                return CompletionReport(
+                    goal_id, False, "no_goal", self.stats.rounds, note="goal 未初始化"
+                )
             if goal.is_complete():
-                return CompletionReport(goal_id, True, "completed",
-                                        self.stats.rounds,
-                                        gates_resolved=self.stats.gates_resolved,
-                                        gates_rejected=self.stats.gates_rejected,
-                                        restarts=self.stats.restarts,
-                                        note="全部 todo 完成且 gates 通过")
+                return CompletionReport(
+                    goal_id,
+                    True,
+                    "completed",
+                    self.stats.rounds,
+                    gates_resolved=self.stats.gates_resolved,
+                    gates_rejected=self.stats.gates_rejected,
+                    restarts=self.stats.restarts,
+                    note="全部 todo 完成且 gates 通过",
+                )
             if self.stats.rounds >= self.max_rounds:
-                return CompletionReport(goal_id, False, "max_rounds",
-                                        self.stats.rounds,
-                                        gates_resolved=self.stats.gates_resolved,
-                                        gates_rejected=self.stats.gates_rejected,
-                                        note=f"达到轮数上限 {self.max_rounds}")
+                return CompletionReport(
+                    goal_id,
+                    False,
+                    "max_rounds",
+                    self.stats.rounds,
+                    gates_resolved=self.stats.gates_resolved,
+                    gates_rejected=self.stats.gates_rejected,
+                    note=f"达到轮数上限 {self.max_rounds}",
+                )
             if time.time() > deadline:
-                return CompletionReport(goal_id, False, "max_hours",
-                                        self.stats.rounds, note=f"达到时长上限 {self.max_hours}h")
+                return CompletionReport(
+                    goal_id,
+                    False,
+                    "max_hours",
+                    self.stats.rounds,
+                    note=f"达到时长上限 {self.max_hours}h",
+                )
             quota = goal.quota
             if quota.paused:
-                return CompletionReport(goal_id, False, "quota_paused",
-                                        self.stats.rounds, note="预算超支暂停")
+                return CompletionReport(
+                    goal_id, False, "quota_paused", self.stats.rounds, note="预算超支暂停"
+                )
 
             # 子代理工作一轮 (run_round 可能重建投影 → 每轮实时取 kernel)
             self.stats.rounds += 1
             await self._heartbeat()
             current = self.driver.kernel.goal
-            completed_before = {
-                t for t, todo in current.todos.items() if todo.status == TODO_DONE}
+            completed_before = {t for t, todo in current.todos.items() if todo.status == TODO_DONE}
             outcome = await self.driver.run_round(engine_call)
             if outcome.get("status") == "paused_by_quota":
-                return CompletionReport(goal_id, False, "quota_paused",
-                                        self.stats.rounds, note="预算超支暂停")
+                return CompletionReport(
+                    goal_id, False, "quota_paused", self.stats.rounds, note="预算超支暂停"
+                )
 
             # 主代理验证 (criteria): 本轮新完成的 todo 产出
             current = self.driver.kernel.goal
-            done_after = {
-                t for t, todo in current.todos.items() if todo.status == TODO_DONE}
+            done_after = {t for t, todo in current.todos.items() if todo.status == TODO_DONE}
             await self._verify_todos(list(done_after - completed_before))
 
 

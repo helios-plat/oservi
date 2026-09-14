@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, ClassVar, cast
 
 from obase.tool_governance import Grant, ToolCallRequest, ToolSpec
 from omodul.governed_tool_transaction import GovernedToolConfig, GovernedToolInput
+
 from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 
 
@@ -20,7 +22,7 @@ def _one(value: Any) -> Any:
 class ToolGovernanceEngine(EngineSkeleton):
     """Route native and MCP calls into one injected governed transaction."""
 
-    injection_points: dict[str, Injection] = {  # noqa: RUF012
+    injection_points: ClassVar[dict] = {
         "registry": Injection("obase", "0..1", "native/MCP tool contract registry"),
         "tool_resolve": Injection("oprim", "1", "versioned native/MCP tool lookup"),
         "prepare_tool_execution": Injection("oskill", "1", "grant and effect preparation"),
@@ -154,7 +156,7 @@ class ToolGovernanceEngine(EngineSkeleton):
                 result = await result
             self._call_count += 1
             return cast(dict[str, Any], result)
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
             self._last_error = type(exc).__name__
             return {
                 "status": "failed",

@@ -31,7 +31,7 @@ class AgentLiveState:
     """单 agent 实时状态 (事件投影)。"""
 
     agent_id: str
-    status: str = "idle"           # idle | running | done | error
+    status: str = "idle"  # idle | running | done | error
     current_task: str = ""
     last_message: str = ""
     artifacts: list[str] = field(default_factory=list)
@@ -53,14 +53,14 @@ class AgentLiveState:
 class TeamMonitor:
     """团队监视器: 订阅事件流 → 投影 live_state + 事件流队列。"""
 
-    def __init__(self, team_id: str, agents: list[str],
-                 event_bus: EventBus | None = None) -> None:
+    def __init__(self, team_id: str, agents: list[str], event_bus: EventBus | None = None) -> None:
         self.team_id = team_id
         self.agents = agents
         self.bus = event_bus or EventBus()
         self._states: dict[str, AgentLiveState] = {
-            aid: AgentLiveState(agent_id=aid) for aid in agents}
-        self._events: list[dict[str, Any]] = []          # 事件流 (订阅接口)
+            aid: AgentLiveState(agent_id=aid) for aid in agents
+        }
+        self._events: list[dict[str, Any]] = []  # 事件流 (订阅接口)
         self._lock = threading.RLock()
         self._handler: Callable[[Event], None] | None = None
 
@@ -106,9 +106,14 @@ class TeamMonitor:
             elif et == "agent.error":
                 st.status = "error"
                 st.last_message = str(payload.get("error", ""))
-            self._events.append({"type": et, "agent_id": agent_id,
-                                 "payload": payload, "ts": event.ts
-                                 if hasattr(event, "ts") else time.time()})
+            self._events.append(
+                {
+                    "type": et,
+                    "agent_id": agent_id,
+                    "payload": payload,
+                    "ts": event.ts if hasattr(event, "ts") else time.time(),
+                }
+            )
             if len(self._events) > 200:
                 self._events = self._events[-200:]
 
@@ -122,9 +127,13 @@ class TeamMonitor:
             return self._events[-limit:]
 
 
-def monitor_team(team_id: str, agents: list[str],
-                 event_bus: EventBus | None = None,
-                 *, trace_id: str | None = None) -> dict[str, Any]:
+def monitor_team(
+    team_id: str,
+    agents: list[str],
+    event_bus: EventBus | None = None,
+    *,
+    trace_id: str | None = None,
+) -> dict[str, Any]:
     """主入口: 启动团队监视, 返回实时状态 + 事件流 (事件溯源投影)。
 
     状态由事件投影得出 (非静态 summary); 状态变更可经 event_stream 订阅轮询。
@@ -141,17 +150,21 @@ def monitor_team(team_id: str, agents: list[str],
         from oprim._audit_emit import AuditEvent, JsonlSink
 
         sink = JsonlSink(str(Path.home() / ".veya" / "audit" / "team-monitor.jsonl"))
-        sink.write(AuditEvent(
-            event_type="diagnose",
-            trace_id=trace_id or f"team_{team_id}",
-            inputs={"team_id": team_id, "agents": agents,
-                    "projected": {aid: s["status"] for aid, s in state.items()}},
-        ))
-    except Exception:
+        sink.write(
+            AuditEvent(
+                event_type="diagnose",
+                trace_id=trace_id or f"team_{team_id}",
+                inputs={
+                    "team_id": team_id,
+                    "agents": agents,
+                    "projected": {aid: s["status"] for aid, s in state.items()},
+                },
+            )
+        )
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
         import logging
 
-        logging.getLogger("veya.team_monitor").warning(
-            "audit write failed", exc_info=True)
+        logging.getLogger("veya.team_monitor").warning("audit write failed", exc_info=True)
 
     return {
         "team_id": team_id,

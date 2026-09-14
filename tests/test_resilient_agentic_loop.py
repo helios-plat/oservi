@@ -66,7 +66,9 @@ async def test_runs_tool_then_finishes() -> None:
     )
     rec = await engine.run_loop("hi")
     assert rec["status"] == "completed"
-    assert any(m.get("role") == "tool" and "echo:x" in str(m.get("content")) for m in rec["messages"])
+    assert any(
+        m.get("role") == "tool" and "echo:x" in str(m.get("content")) for m in rec["messages"]
+    )
 
 
 @pytest.mark.asyncio

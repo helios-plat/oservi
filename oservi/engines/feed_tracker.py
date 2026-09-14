@@ -23,7 +23,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -84,7 +85,9 @@ class FeedTrackerEngine(EngineSkeleton):
         # assembler passes lists; extract single callable for cardinality="1"
         self.fetch_event = fetch_event[0] if isinstance(fetch_event, list) else fetch_event
         self.subscription = subscription[0] if isinstance(subscription, list) else subscription
-        self.ingest = (ingest[0] if isinstance(ingest, list) and ingest else ingest) if ingest else None
+        self.ingest = (
+            (ingest[0] if isinstance(ingest, list) and ingest else ingest) if ingest else None
+        )
         self.trigger = trigger
         self.config = config
         self.interval_seconds = int(trigger.get("on_interval", 5))
@@ -121,7 +124,7 @@ class FeedTrackerEngine(EngineSkeleton):
                 events = await self._fetch_events()
                 for event in events:
                     await self._process_event(event)
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 self._last_error = f"{type(e).__name__}: {e}"
                 logger.exception(f"FeedTrackerEngine '{self.name}' tick failed")
             self._tick_count += 1
@@ -137,7 +140,11 @@ class FeedTrackerEngine(EngineSkeleton):
             await self._process_event(event)
             processed += 1
         self._tick_count += 1
-        return {"events_fetched": len(events), "events_processed": processed, "tick_count": self._tick_count}
+        return {
+            "events_fetched": len(events),
+            "events_processed": processed,
+            "tick_count": self._tick_count,
+        }
 
     async def _fetch_events(self) -> list[dict[str, Any]]:
         """调 fetch_event oprim 拉取事件列表."""
@@ -151,7 +158,7 @@ class FeedTrackerEngine(EngineSkeleton):
                 else:
                     result = raw
             return result if isinstance(result, list) else []
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             logger.warning(f"FeedTrackerEngine fetch_event failed: {e}")
             return []
 
@@ -165,7 +172,7 @@ class FeedTrackerEngine(EngineSkeleton):
                 raw = self.subscription(event=event)
                 if asyncio.iscoroutine(raw):
                     await raw
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             logger.warning(f"FeedTrackerEngine subscription update failed: {e}")
 
         # 可选落库 (omodul)
@@ -177,7 +184,7 @@ class FeedTrackerEngine(EngineSkeleton):
                     raw = self.ingest(event=event)
                     if asyncio.iscoroutine(raw):
                         await raw
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 logger.warning(f"FeedTrackerEngine ingest failed: {e}")
 
     # ===== 健康检查 =====

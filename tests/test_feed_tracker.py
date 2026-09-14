@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
 
 from oservi import list_skeletons
 from oservi.engines.feed_tracker import FeedTrackerEngine
 
-
 # ===== Fake injectables =====
+
 
 def fake_fetch_event(*, config):
     return [
@@ -44,19 +43,20 @@ async def async_ingest(*, event):
 
 def _make_engine(**overrides):
     processed_events.clear()
-    defaults = dict(
-        fetch_event=fake_fetch_event,
-        subscription=fake_subscription,
-        ingest=None,
-        trigger={"on_interval": 5},
-        config={},
-        name="test-feed-tracker",
-    )
+    defaults = {
+        "fetch_event": fake_fetch_event,
+        "subscription": fake_subscription,
+        "ingest": None,
+        "trigger": {"on_interval": 5},
+        "config": {},
+        "name": "test-feed-tracker",
+    }
     defaults.update(overrides)
     return FeedTrackerEngine(**defaults)
 
 
 # ===== Tests =====
+
 
 def test_feed_tracker_registered():
     assert "feed_tracker" in list_skeletons()
@@ -129,8 +129,10 @@ def test_fetch_events_empty():
 
 def test_process_event_calls_subscription():
     seen = []
+
     def sub(*, event):
         seen.append(event)
+
     engine = _make_engine(subscription=sub)
     asyncio.run(engine._process_event({"id": "e1"}))
     assert len(seen) == 1
@@ -183,6 +185,7 @@ def test_stop_sets_stop_event():
 def test_fetch_error_returns_empty_list():
     def bad_fetch(*, config):
         raise RuntimeError("network error")
+
     engine = _make_engine(fetch_event=bad_fetch)
     events = asyncio.run(engine._fetch_events())
     assert events == []

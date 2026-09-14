@@ -94,10 +94,10 @@ class ServiceManifest:
 ```python
 def assemble(manifest: ServiceManifest) -> Service:
     """一次性装配:
-       读 manifest → 校验注入 → 加载骨架 → 注入元素 → 返回可 .run() 的 Service
-       
-       不做 reconcile (无项目实证, 砍掉 K8s Operator 幂等).
-       不管部署.
+    读 manifest → 校验注入 → 加载骨架 → 注入元素 → 返回可 .run() 的 Service
+
+    不做 reconcile (无项目实证, 砍掉 K8s Operator 幂等).
+    不管部署.
     """
 ```
 

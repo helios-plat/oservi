@@ -49,13 +49,13 @@ _MAP = {"draft->pending": "mark_paid", "pending->canceled": "cancel"}
 
 
 def _make_engine(**overrides):
-    defaults = dict(
-        transitions=[mark_paid, cancel],
-        validators=None,
-        trigger={"on_demand": True},
-        config={"transition_map": dict(_MAP)},
-        name="test-fsm",
-    )
+    defaults = {
+        "transitions": [mark_paid, cancel],
+        "validators": None,
+        "trigger": {"on_demand": True},
+        "config": {"transition_map": dict(_MAP)},
+        "name": "test-fsm",
+    }
     defaults.update(overrides)
     return StateMachineEngine(**defaults)
 

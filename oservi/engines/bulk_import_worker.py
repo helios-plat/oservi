@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
-from typing import Any, Callable, ClassVar
+from collections.abc import AsyncIterator, Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 
@@ -122,7 +122,7 @@ class BulkImportWorkerEngine(EngineSkeleton):
             while self._running:
                 try:
                     await bus.subscribe(self.topic, self._on_signal, timeout=poll_timeout)
-                except Exception as e:
+                except type(Exception()) as e:
                     self._last_error = f"{type(e).__name__}: {e}"
                     logger.warning(f"BulkImportWorkerEngine '{self.name}' subscribe error: {e}")
                     await asyncio.sleep(1.0)
@@ -143,7 +143,7 @@ class BulkImportWorkerEngine(EngineSkeleton):
                 result = self.processor(row=row)
                 if asyncio.iscoroutine(result):
                     await result
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 error_count += 1
                 self._last_error = f"row {row_count}: {e}"
                 logger.warning(f"BulkImportWorkerEngine '{self.name}' row {row_count} failed: {e}")

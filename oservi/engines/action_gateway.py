@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, ClassVar
 
 from obase.action import ActionDecision, ActionRequest
 from omodul.action_gateway import (
@@ -15,6 +16,7 @@ from omodul.action_gateway import (
     execute_governed_action,
     govern_action,
 )
+
 from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
 
 
@@ -27,7 +29,7 @@ def _one(value: Any) -> Any:
 class ActionGatewayEngine(EngineSkeleton):
     """On-demand governance/execution mechanism with injected callables."""
 
-    injection_points: dict[str, Injection] = {
+    injection_points: ClassVar[dict] = {
         "policy_evaluator": Injection(
             kind="oskill", cardinality="1", description="stateless action policy evaluator"
         ),

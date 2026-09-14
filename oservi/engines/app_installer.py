@@ -31,7 +31,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -81,7 +82,7 @@ class AppInstallerEngine(EngineSkeleton):
         )
     """
 
-    injection_points = {
+    injection_points: ClassVar[dict] = {
         "catalog_fetch": Injection(
             kind="oprim",
             cardinality="1",
@@ -166,11 +167,11 @@ class AppInstallerEngine(EngineSkeleton):
                 if self.on_install_done:
                     try:
                         self.on_install_done(result)
-                    except Exception as e:
+                    except type(Exception()) as e:
                         logger.warning(f"on_install_done callback failed: {e}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
                 self._last_error = f"{type(e).__name__}: {e}"
                 logger.exception(f"AppInstallerEngine '{self.name}' install failed")
 
@@ -197,7 +198,7 @@ class AppInstallerEngine(EngineSkeleton):
 
         # Step 2: compose_pull (可选)
         if not self.config.get("skip_pull"):
-            pull_result = await self._call(self.compose_pull, compose_file=compose_file)
+            await self._call(self.compose_pull, compose_file=compose_file)
             trail.append({"step": "compose_pull", "ok": True})
 
         # Step 3: compose_up
@@ -213,7 +214,7 @@ class AppInstallerEngine(EngineSkeleton):
 
         # Step 4: caddy_route_add
         if routes:
-            route_result = await self._call(self.caddy_route_add, routes=routes)
+            await self._call(self.caddy_route_add, routes=routes)
             trail.append({"step": "caddy_route_add", "ok": True})
 
         # Step 5: verify_health
@@ -236,7 +237,7 @@ class AppInstallerEngine(EngineSkeleton):
             if asyncio.iscoroutine(result):
                 result = await result
             return result
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
             return f"ERROR: {type(e).__name__}: {e}"
 
     def _fail_result(
