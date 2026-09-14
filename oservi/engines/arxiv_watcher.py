@@ -124,7 +124,7 @@ class ArxivWatcherEngine(EngineSkeleton):
         work_dir = Path(self._config.get("work_dir", tempfile.gettempdir())) / "arxiv"
         work_dir.mkdir(parents=True, exist_ok=True)
         rate_limit_sleep = self._config.get("rate_limit_sleep", 3.0)
-        user_id_hash = self._config.get("user_id_hash", "arxiv_watcher")
+        identity_ref_hash = self._config.get("identity_ref_hash", "arxiv_watcher")
 
         # Step 1: 查论文列表
         try:
@@ -199,7 +199,7 @@ class ArxivWatcherEngine(EngineSkeleton):
                 # 入库
                 ingest_kwargs = {
                     "file_path": pdf_path,
-                    "user_id_hash": user_id_hash,
+                    "identity_ref_hash": identity_ref_hash,
                     "medium_hint": "pdf",
                     "metadata_override": {
                         "arxiv_id": paper.arxiv_id,

@@ -77,7 +77,7 @@ class SourceWatcherEngine(EngineSkeleton):
         max_results = self._config.get("max_results", 20)
         work_dir    = Path(self._config.get("work_dir", tempfile.gettempdir())) / "source_watcher"
         work_dir.mkdir(parents=True, exist_ok=True)
-        user_id_hash = self._config.get("user_id_hash", "source_watcher")
+        identity_ref_hash = self._config.get("identity_ref_hash", "source_watcher")
         force_ipv4   = self._config.get("force_ipv4", False)
 
         search_fn = self._searchers.get(source_type)
@@ -124,7 +124,7 @@ class SourceWatcherEngine(EngineSkeleton):
                 else:
                     await asyncio.to_thread(self._download, item.download_url, dest, **dl_kw)
 
-                kw = {"file_path": dest, "user_id_hash": user_id_hash,
+                kw = {"file_path": dest, "identity_ref_hash": identity_ref_hash,
                       "medium_hint": item.file_type,
                       "metadata_override": {"external_id": item.external_id,
                                             "source": source_type, **item.metadata}}
