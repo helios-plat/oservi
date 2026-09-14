@@ -17,7 +17,7 @@ dependencies = [
     "obase @ git+https://github.com/helios-plat/obase.git@7d31719d8411b4fb34952ae4098ab320625d14dd",
     "oprim @ git+https://github.com/helios-plat/oprim.git@e7f9c65196437d3bff09401aa02bc817d071eec3",
     "oskill @ git+https://github.com/helios-plat/oskill.git@cac39df03778d4e4e44db3c006f8fc788dc757f6",
-    "omodul @ git+https://github.com/helios-plat/omodul.git@a64e6af3348153f0772ab52f89c41173d8ad5229",
+    "omodul @ git+https://github.com/helios-plat/omodul.git@62b23b6ae56d4248e8cb8bae37e633a7df7294f8",
     "croniter>=2.0",
 ]
 
