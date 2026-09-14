@@ -15,6 +15,7 @@
 """
 
 __version__ = "1.4.0"
+__3o_canonical_exports__ = frozenset({"ProductionExecutionEngine", "SequentialComposerEngine"})
 
 # Public contract for service composition.  Engines remain stateless and only
 # describe injected dependencies; application persistence stays outside this
