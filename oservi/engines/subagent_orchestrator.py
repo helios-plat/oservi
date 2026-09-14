@@ -119,34 +119,177 @@ class SubagentOrchestratorEngine(EngineSkeleton):
         Returns:
             {"status": "completed", "results": [...], "total_cost_usd": float}
         """
-        if parallel:
-            max_par = self.config.get("max_parallel", 4)
-            sem = asyncio.Semaphore(max_par)
+        return await self._orchestrate_impl(tasks, parallel=parallel)
 
-            async def _run_one(task: dict[str, Any]) -> Any:
-                async with sem:
-                    return await self._run_subagent(task)
+    async def _orchestrate_impl(
+        self, tasks: list[dict[str, Any]], *, parallel: bool
+    ) -> dict[str, Any]:
+        """DAG scheduler with immediate slot replenishment and typed fan-in."""
+        ids = [task.get("id") for task in tasks]
+        if any(not isinstance(task, dict) or not task.get("id") for task in tasks):
+            raise ValueError("every task requires a non-empty id")
+        if len(set(ids)) != len(ids):
+            raise ValueError("duplicate task id")
+        by_id = {task["id"]: task for task in tasks}
+        dependencies = {task["id"]: list(task.get("depends_on", [])) for task in tasks}
+        if any(task_id in deps for task_id, deps in dependencies.items()):
+            raise ValueError("self dependency")
+        if any(dep not in by_id for deps in dependencies.values() for dep in deps):
+            raise ValueError("missing dependency")
+        self._validate_acyclic(dependencies)
+        status = {task_id: "PENDING" for task_id in ids}
+        outputs: dict[str, Any] = {}
+        running: dict[str, asyncio.Task] = {}
+        ready = [task_id for task_id in ids if not dependencies[task_id]]
+        max_parallel = 1 if not parallel else max(1, int(self.config.get("max_parallel", 4)))
+        backpressure_limit = self.config.get("backpressure_limit")
+        backpressure_activated = False
+        deadline = None
+        if self.config.get("overall_timeout"):
+            deadline = asyncio.get_running_loop().time() + float(self.config["overall_timeout"])
 
-            results = await asyncio.gather(*[_run_one(t) for t in tasks], return_exceptions=True)
-        else:
-            results = []
-            for task in tasks:
-                result = await self._run_subagent(task)
-                results.append(result)
+        async def admitted(task: dict[str, Any]) -> bool:
+            policy = self.config.get("admission_control")
+            if policy is None:
+                return True
+            value = policy(task=task, running=len(running), ready=len(ready))
+            return bool(await value if inspect.isawaitable(value) else value)
 
-        # propagate cost
-        total_cost = 0.0
-        for r in results:
-            if isinstance(r, dict):
-                total_cost += float(r.get("cost_usd", 0.0))
-        self._total_cost_usd += total_cost
-        self._task_count += len(tasks)
+        def mark_blocked() -> None:
+            changed = True
+            while changed:
+                changed = False
+                for task_id in ids:
+                    if status[task_id] == "PENDING" and any(
+                        status[dep]
+                        in {"FAILED", "BLOCKED", "CANCELLED", "TIMED_OUT", "ADMISSION_REJECTED"}
+                        for dep in dependencies[task_id]
+                    ):
+                        status[task_id] = "BLOCKED"
+                        changed = True
+                        if task_id in ready:
+                            ready.remove(task_id)
 
-        return {
-            "status": "completed",
-            "results": [r if not isinstance(r, Exception) else {"error": str(r)} for r in results],
-            "total_cost_usd": total_cost,
-        }
+        try:
+            while ready or running or any(value == "PENDING" for value in status.values()):
+                mark_blocked()
+                if backpressure_limit is not None and len(ready) > int(backpressure_limit):
+                    backpressure_activated = True
+                for task_id in ids:
+                    if (
+                        status[task_id] == "PENDING"
+                        and all(status[dep] == "COMPLETED" for dep in dependencies[task_id])
+                        and task_id not in ready
+                    ):
+                        ready.append(task_id)
+                while ready and len(running) < max_parallel:
+                    task_id = ready.pop(0)
+                    if not await admitted(by_id[task_id]):
+                        status[task_id] = "ADMISSION_REJECTED"
+                        outputs[task_id] = {"task_id": task_id, "status": "admission_rejected"}
+                        continue
+                    status[task_id] = "RUNNING"
+                    timeout = by_id[task_id].get("timeout", self.config.get("task_timeout"))
+                    coro = self._run_subagent(by_id[task_id])
+                    running[task_id] = asyncio.create_task(
+                        asyncio.wait_for(coro, float(timeout)) if timeout else coro
+                    )
+                if not running:
+                    mark_blocked()
+                    break
+                wait_timeout = (
+                    None
+                    if deadline is None
+                    else max(0.0, deadline - asyncio.get_running_loop().time())
+                )
+                done, _ = await asyncio.wait(
+                    running.values(), timeout=wait_timeout, return_when=asyncio.FIRST_COMPLETED
+                )
+                if not done:
+                    for task_id, child in running.items():
+                        child.cancel()
+                        status[task_id] = "TIMED_OUT"
+                        outputs[task_id] = {"task_id": task_id, "status": "timed_out"}
+                    await asyncio.gather(*running.values(), return_exceptions=True)
+                    running.clear()
+                    break
+                for child in done:
+                    task_id = next(key for key, value in running.items() if value is child)
+                    del running[task_id]
+                    try:
+                        value = child.result()
+                        outputs[task_id] = value
+                        status[task_id] = (
+                            "FAILED"
+                            if isinstance(value, dict) and value.get("error")
+                            else "COMPLETED"
+                        )
+                    except asyncio.TimeoutError:
+                        status[task_id] = "TIMED_OUT"
+                        outputs[task_id] = {"task_id": task_id, "status": "timed_out"}
+                    except asyncio.CancelledError:
+                        status[task_id] = "CANCELLED"
+                        raise
+                    except Exception as exc:
+                        status[task_id] = "FAILED"
+                        outputs[task_id] = {
+                            "task_id": task_id,
+                            "status": "failed",
+                            "error": str(exc),
+                        }
+            completed = [outputs[key] for key in ids if status[key] == "COMPLETED"]
+            failed = [outputs[key] for key in ids if status[key] == "FAILED"]
+            blocked = [
+                {"task_id": key, "status": "blocked"} for key in ids if status[key] == "BLOCKED"
+            ]
+            cancelled = [
+                {"task_id": key, "status": "cancelled"} for key in ids if status[key] == "CANCELLED"
+            ]
+            timed_out = [outputs[key] for key in ids if status[key] == "TIMED_OUT"]
+            rejected = [outputs[key] for key in ids if status[key] == "ADMISSION_REJECTED"]
+            total_cost = sum(
+                float(item.get("cost_usd", 0.0))
+                for item in outputs.values()
+                if isinstance(item, dict)
+            )
+            self._total_cost_usd += total_cost
+            self._task_count += len(tasks)
+            return {
+                "status": "completed",
+                "results": [outputs[task_id] for task_id in ids if task_id in outputs],
+                "completed": completed,
+                "failed": failed + rejected,
+                "blocked": blocked,
+                "cancelled": cancelled,
+                "timed_out": timed_out,
+                "partial": bool(failed or blocked or cancelled or timed_out or rejected),
+                "backpressure_activated": backpressure_activated,
+                "total_cost_usd": total_cost,
+            }
+        finally:
+            for child in running.values():
+                child.cancel()
+            if running:
+                await asyncio.gather(*running.values(), return_exceptions=True)
+
+    @staticmethod
+    def _validate_acyclic(dependencies: dict[str, list[str]]) -> None:
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(node: str) -> None:
+            if node in visiting:
+                raise ValueError("dependency cycle")
+            if node in visited:
+                return
+            visiting.add(node)
+            for dep in dependencies[node]:
+                visit(dep)
+            visiting.remove(node)
+            visited.add(node)
+
+        for node in dependencies:
+            visit(node)
 
     async def _run_subagent(self, task: dict[str, Any]) -> Any:
         """Invoke subagent_runner with iscoroutinefunction check."""
