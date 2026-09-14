@@ -33,7 +33,7 @@ async def fake_llm_caller(*, messages, max_tokens=512):
 fake_llm_caller.__module__ = "oprim.llm_call"  # v1.0 §3.2 单 LLM = oprim
 
 
-async def fake_ingest_omodul(*, content, source_url=None, tags=None, user_id=None, title=None):
+async def fake_ingest_omodul(*, content, source_url=None, tags=None, identity_ref=None, title=None):
     return {
         "findings": {"substrate_id": f"sub_{hash(source_url) & 0xFFFF:04x}"},
         "status": "completed",
@@ -202,7 +202,7 @@ class TestResearcherWorkflow:
             config={},
         )
         engine = assemble(m)
-        result = await engine.research(query="x", user_id="u1")
+        result = await engine.research(query="x", identity_ref="anon-u1")
         assert len(result["ingested_substrate_ids"]) > 0
     
     @pytest.mark.asyncio

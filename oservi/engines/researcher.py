@@ -70,7 +70,7 @@ class ResearcherEngine(EngineSkeleton):
             },
         )
         engine = assemble(manifest)
-        result = await engine.research(query="量子计算最新进展", user_id="user_123")
+        result = await engine.research(query="量子计算最新进展", identity_ref="anon-user-123")
     """
     
     injection_points = {
@@ -138,14 +138,14 @@ class ResearcherEngine(EngineSkeleton):
         self,
         *,
         query: str,
-        user_id: str | None = None,
+        identity_ref: str | None = None,
         max_articles_override: int | None = None,
     ) -> dict[str, Any]:
         """执行一次 research workflow.
         
         Args:
             query: 用户查询
-            user_id: 用户 id (落库用, 可选)
+            identity_ref: caller-provided anonymous reference for ingestion
             max_articles_override: 临时覆盖 config.max_total_articles
         
         Returns:
@@ -186,9 +186,9 @@ class ResearcherEngine(EngineSkeleton):
             
             # 4. (可选) 落库
             ingested_ids = []
-            if self.ingest_omodul_fn and user_id:
+            if self.ingest_omodul_fn and identity_ref:
                 ingested_ids = await self._ingest_articles(
-                    articles_with_content, query, user_id
+                    articles_with_content, query, identity_ref
                 )
             
             self._research_count += 1
@@ -341,7 +341,7 @@ Example: ["term 1", "term 2", "term 3"]"""
         self,
         articles: list[dict[str, Any]],
         query: str,
-        user_id: str,
+        identity_ref: str,
     ) -> list[str]:
         """调 ingest_omodul 落库 (每篇 article 一个 substrate)."""
         ingested = []
@@ -351,7 +351,7 @@ Example: ["term 1", "term 2", "term 3"]"""
                     content=article.get("content", ""),
                     source_url=article.get("url"),
                     tags=[f"research:{hash(query) & 0xFFFFFFFF:08x}"],
-                    user_id=user_id,
+                    identity_ref=identity_ref,
                 )
                 if asyncio.iscoroutine(result):
                     result = await result
