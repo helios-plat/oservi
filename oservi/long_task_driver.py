@@ -191,7 +191,15 @@ class LongTaskDriver:
         result = await engine_call(ctx.prompt_suffix)
         try:
             await self.post_round(result)
-        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
+        except (
+            BudgetExceeded,
+            ValueError,
+            TypeError,
+            KeyError,
+            AttributeError,
+            RuntimeError,
+            OSError,
+        ) as exc:
             # 本轮动作完成但配额超支: 返回 paused, 下一轮 pre_round 硬拦截
             if "budget" in str(exc).lower():
                 return {
