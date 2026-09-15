@@ -52,7 +52,12 @@ from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
 from oservi.engines.tool_governance import ToolGovernanceEngine
 from oservi.engines.triage import TriageEngine
 from oservi.engines.veya_evolution import VeyaEvolutionEngine
-from oservi.manifest import ManifestValidationError, ServiceManifest
+from oservi.manifest import CANONICAL_ELEMENTS, ManifestValidationError, ServiceManifest
+
+# 3O canonical elements; implementation dependencies stay behind their public
+# ports and do not import the project layer.
+from oservi.observation_journal import ObservationJournal
+from oservi.persistent_agent_session import PersistentAgentSession
 
 # 三框架运行时统一桥 (prime-agent / pi / agentscope)
 from oservi.runtime_bridge import (
@@ -67,6 +72,7 @@ from oservi.runtime_bridge import (
     register_all_runtimes,
     register_runtime,
 )
+from oservi.workspace_fleet import WorkspaceFleet
 
 __all__ = [
     "ActionGatewayEngine",
@@ -113,6 +119,7 @@ __all__ = [
 
 __all__ += [
     "ALL_RUNTIMES",
+    "CANONICAL_ELEMENTS",
     "TRIGGER_KINDS",
     "AgentLiveState",
     "AgentRuntime",
@@ -126,6 +133,8 @@ __all__ += [
     "LongTaskDriver",
     "LongTaskError",
     "LoopStats",
+    "ObservationJournal",
+    "PersistentAgentSession",
     "PiBridgeRuntime",
     "PrimeAgentRuntime",
     "RoundContext",
@@ -133,6 +142,7 @@ __all__ += [
     "SourceWatcherEngine",
     "TeamMonitor",
     "TriggerRegistry",
+    "WorkspaceFleet",
     "agent_bench_harness",
     "agentscope_bridge",
     "monitor_team",

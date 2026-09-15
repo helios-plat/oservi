@@ -23,8 +23,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Callable
-from typing import Any, ClassVar
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -33,6 +33,24 @@ from oservi.engines._base import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class WorkspaceFleetPort(Protocol):
+    """Injected workspace allocator; this engine never imports its provider."""
+
+    async def allocate(self, spec: Any) -> Any: ...
+
+    async def bind(self, workspace: Any, session_ref: Any, **kwargs: Any) -> Any: ...
+
+
+@runtime_checkable
+class PersistentAgentSessionPort(Protocol):
+    """Injected session lifecycle facade for workspace composition."""
+
+    async def create(self, spec: Any) -> Any: ...
+
+    async def start(self) -> Any: ...
 
 
 class SubagentOrchestratorEngine(EngineSkeleton):
@@ -51,7 +69,7 @@ class SubagentOrchestratorEngine(EngineSkeleton):
         result = asyncio.run(engine.orchestrate(tasks=[...]))
     """
 
-    injection_points: ClassVar[dict] = {
+    injection_points: ClassVar[dict[str, Injection]] = {
         "subagent_runner": Injection(
             kind="omodul",
             cardinality="1",
@@ -67,6 +85,16 @@ class SubagentOrchestratorEngine(EngineSkeleton):
             cardinality="0..1",
             description="Optional task scheduler",
         ),
+        "workspace_fleet": Injection(
+            kind="layer4",
+            cardinality="0..1",
+            description="Optional isolated workspace allocator",
+        ),
+        "session_factory": Injection(
+            kind="layer4",
+            cardinality="0..1",
+            description="Optional persistent agent session factory",
+        ),
     }
     trigger_mode: str = "on_demand"
 
@@ -76,6 +104,8 @@ class SubagentOrchestratorEngine(EngineSkeleton):
         subagent_runner: Callable[..., Any],
         llm_caller: Callable[..., Any],
         scheduler: Callable[..., Any] | None = None,
+        workspace_fleet: WorkspaceFleetPort | None = None,
+        session_factory: Any | None = None,
         trigger: dict[str, Any],
         config: dict[str, Any],
         name: str,
@@ -84,6 +114,8 @@ class SubagentOrchestratorEngine(EngineSkeleton):
         self.subagent_runner = subagent_runner
         self.llm_caller = llm_caller
         self.scheduler = scheduler
+        self.workspace_fleet = workspace_fleet
+        self.session_factory = session_factory
         self.trigger = trigger
         self.config = config
 
@@ -122,17 +154,194 @@ class SubagentOrchestratorEngine(EngineSkeleton):
         """
         return await self._orchestrate_impl(tasks, parallel=parallel)
 
+    async def orchestrate_workspace_candidates(
+        self,
+        tasks: Sequence[Mapping[str, Any]],
+        *,
+        workspace_specs: Sequence[Any] | Mapping[str, Any] | None = None,
+        parallel: bool = True,
+        start_sessions: bool = True,
+    ) -> dict[str, Any]:
+        """Fan out tasks into isolated workspaces and aggregate raw candidates.
+
+        Allocation and session lifecycle are injected ports.  The method only
+        attaches identifiers to task inputs and returns one result per
+        candidate; it does not create a GoalRun, choose a winner, or mark a
+        result accepted.
+        """
+        if self.workspace_fleet is None:
+            raise RuntimeError("workspace_fleet injection is required")
+        enriched: list[dict[str, Any]] = []
+        bindings: list[dict[str, Any]] = []
+        for index, original in enumerate(tasks):
+            task = dict(original)
+            task_id = str(task.get("id", ""))
+            spec = self._workspace_spec_for(
+                task_id,
+                index,
+                task,
+                workspace_specs,
+            )
+            workspace = await self.workspace_fleet.allocate(spec)
+            workspace_id = self._identifier(workspace, "workspace_id")
+            session_ref = None
+            if self.session_factory is not None:
+                session_ref = await self._start_injected_session(
+                    workspace_id,
+                    task,
+                    spec,
+                    start=start_sessions,
+                )
+                if session_ref is not None:
+                    scope = (
+                        str(spec.get("scope", "default"))
+                        if isinstance(spec, Mapping)
+                        else str(task.get("scope", "default"))
+                    )
+                    await self.workspace_fleet.bind(workspace, session_ref, scope=scope)
+            task["workspace_id"] = workspace_id
+            task["workspace_ref"] = workspace_id
+            if session_ref is not None:
+                task["session_ref"] = session_ref
+            enriched.append(task)
+            bindings.append(
+                {
+                    "task_id": task_id,
+                    "workspace_id": workspace_id,
+                    "session_ref": session_ref,
+                }
+            )
+        result = await self.orchestrate(enriched, parallel=parallel)
+        by_task = {
+            str(item.get("task_id", "")): item
+            for item in result.get("results", [])
+            if isinstance(item, Mapping)
+        }
+        candidates = [
+            {
+                **binding,
+                "result": by_task.get(binding["task_id"]),
+            }
+            for binding in bindings
+        ]
+        return {
+            **result,
+            "candidates": candidates,
+            "candidate_aggregation": "raw_results",
+            "winner": None,
+            "acceptance_authority": 0,
+        }
+
+    async def fan_out_workspaces(
+        self,
+        tasks: Sequence[Mapping[str, Any]],
+        *,
+        workspace_specs: Sequence[Any] | Mapping[str, Any] | None = None,
+        parallel: bool = True,
+    ) -> dict[str, Any]:
+        """Readable alias for the workspace candidate composition."""
+        return await self.orchestrate_workspace_candidates(
+            tasks, workspace_specs=workspace_specs, parallel=parallel
+        )
+
+    @staticmethod
+    def aggregate_candidates(candidates: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        """Return stable raw candidate ordering; selection remains external."""
+        ordered = sorted(
+            (dict(item) for item in candidates),
+            key=lambda item: (str(item.get("task_id", "")), str(item.get("workspace_id", ""))),
+        )
+        return {
+            "candidates": ordered,
+            "selection_required": bool(ordered),
+            "winner": None,
+            "acceptance_authority": 0,
+        }
+
+    @staticmethod
+    def _workspace_spec_for(
+        task_id: str,
+        index: int,
+        task: Mapping[str, Any],
+        workspace_specs: Sequence[Any] | Mapping[str, Any] | None,
+    ) -> Any:
+        if isinstance(workspace_specs, Mapping):
+            selected = workspace_specs.get(task_id)
+            if selected is not None:
+                return selected
+        elif workspace_specs is not None and index < len(workspace_specs):
+            return workspace_specs[index]
+        selected = task.get("workspace_spec")
+        if selected is not None:
+            return selected
+        return {
+            "source_ref": str(task.get("source_ref", task.get("repo", task_id))),
+            "workspace_type": str(task.get("workspace_type", "ephemeral")),
+            "owner_id": str(task.get("owner_id", task_id)),
+            "scope": str(task.get("scope", "default")),
+        }
+
+    async def _start_injected_session(
+        self,
+        workspace_id: str,
+        task: Mapping[str, Any],
+        workspace_spec: Any,
+        *,
+        start: bool,
+    ) -> str | None:
+        factory = self.session_factory
+        session = factory
+        session_spec = {
+            "workspace_ref": workspace_id,
+            "agent_type": str(task.get("agent_type", "terminal")),
+            "scope": str(
+                workspace_spec.get("scope", "default")
+                if isinstance(workspace_spec, Mapping)
+                else task.get("scope", "default")
+            ),
+        }
+        if callable(factory) and not hasattr(factory, "create"):
+            value = factory(session_spec)
+            session = await value if inspect.isawaitable(value) else value
+        if session is None:
+            return None
+        if hasattr(session, "create"):
+            created = session.create(session_spec)
+            await created if inspect.isawaitable(created) else created
+        if start and hasattr(session, "start"):
+            started = session.start()
+            await started if inspect.isawaitable(started) else started
+        if hasattr(session, "session_id"):
+            return str(session.session_id)
+        state = getattr(session, "_state", None)
+        if state is not None and getattr(state, "session_id", None):
+            return str(state.session_id)
+        if isinstance(session, Mapping):
+            value = session.get("session_id", session.get("id"))
+            return str(value) if value else None
+        return str(session)
+
+    @staticmethod
+    def _identifier(value: Any, key: str) -> str:
+        if isinstance(value, Mapping):
+            candidate = value.get(key, value.get("id"))
+        else:
+            candidate = getattr(value, key, getattr(value, "id", None))
+        if candidate is None or not str(candidate):
+            raise ValueError(f"allocated workspace has no {key}")
+        return str(candidate)
+
     async def _orchestrate_impl(
         self, tasks: list[dict[str, Any]], *, parallel: bool
     ) -> dict[str, Any]:
         """DAG scheduler with immediate slot replenishment and typed fan-in."""
-        ids = [task.get("id") for task in tasks]
         if any(not isinstance(task, dict) or not task.get("id") for task in tasks):
             raise ValueError("every task requires a non-empty id")
+        ids = [str(task["id"]) for task in tasks]
         if len(set(ids)) != len(ids):
             raise ValueError("duplicate task id")
-        by_id = {task["id"]: task for task in tasks}
-        dependencies = {task["id"]: list(task.get("depends_on", [])) for task in tasks}
+        by_id = {str(task["id"]): task for task in tasks}
+        dependencies = {task_id: list(by_id[task_id].get("depends_on", [])) for task_id in ids}
         if any(task_id in deps for task_id, deps in dependencies.items()):
             raise ValueError("self dependency")
         if any(dep not in by_id for deps in dependencies.values() for dep in deps):
@@ -140,7 +349,7 @@ class SubagentOrchestratorEngine(EngineSkeleton):
         self._validate_acyclic(dependencies)
         status = {task_id: "PENDING" for task_id in ids}
         outputs: dict[str, Any] = {}
-        running: dict[str, asyncio.Task] = {}
+        running: dict[str, asyncio.Task[Any]] = {}
         ready = [task_id for task_id in ids if not dependencies[task_id]]
         max_parallel = 1 if not parallel else max(1, int(self.config.get("max_parallel", 4)))
         backpressure_limit = self.config.get("backpressure_limit")

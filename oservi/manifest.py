@@ -17,6 +17,30 @@ from typing import Any, Literal
 TriggerMode = Literal["on_interval", "on_cron", "on_demand", "on_signal"]
 
 
+# 3O canonical element manifest.  ServiceManifest remains the service
+# assembly input; these records are package-level element registration only.
+CANONICAL_ELEMENTS = {
+    "persistent_agent_session": {
+        "repo": "oservi",
+        "version": 1,
+        "canonical_import": "oservi.persistent_agent_session",
+        "canonical_export": "PersistentAgentSession",
+    },
+    "workspace_fleet": {
+        "repo": "oservi",
+        "version": 1,
+        "canonical_import": "oservi.workspace_fleet",
+        "canonical_export": "WorkspaceFleet",
+    },
+    "observation_journal": {
+        "repo": "oservi",
+        "version": 1,
+        "canonical_import": "oservi.observation_journal",
+        "canonical_export": "ObservationJournal",
+    },
+}
+
+
 @dataclass
 class ServiceManifest:
     """声明式服务定义.
