@@ -51,7 +51,7 @@ class LoopStats:
 class CompletionReport:
     goal_id: str
     completed: bool
-    status: str  # completed | max_rounds | max_hours | quota_paused
+    status: str  # completed | test_cycles_exhausted | max_hours | quota_paused
     rounds: int
     cost_usd: float = 0.0
     gates_resolved: int = 0
@@ -82,14 +82,14 @@ class GoalDrivenLoop:
         *,
         verifier: Verifier | None = None,
         heartbeat_timeout_s: float = 3600.0,
-        max_rounds: int = 500,
+        test_max_cycles: int | None = None,
         max_hours: float = 168.0,
         on_heartbeat: Callable[[str], None] | None = None,
     ) -> None:
         self.driver = driver
         self.verifier = verifier
         self.heartbeat_timeout_s = heartbeat_timeout_s
-        self.max_rounds = max_rounds
+        self.test_max_cycles = test_max_cycles
         self.max_hours = max_hours
         self.on_heartbeat = on_heartbeat
         self.stats = LoopStats()
@@ -169,15 +169,15 @@ class GoalDrivenLoop:
                     restarts=self.stats.restarts,
                     note="全部 todo 完成且 gates 通过",
                 )
-            if self.stats.rounds >= self.max_rounds:
+            if self.test_max_cycles is not None and self.stats.rounds >= self.test_max_cycles:
                 return CompletionReport(
                     goal_id,
                     False,
-                    "max_rounds",
+                    "test_cycles_exhausted",
                     self.stats.rounds,
                     gates_resolved=self.stats.gates_resolved,
                     gates_rejected=self.stats.gates_rejected,
-                    note=f"达到轮数上限 {self.max_rounds}",
+                    note=f"达到测试循环上限 {self.test_max_cycles}",
                 )
             if time.time() > deadline:
                 return CompletionReport(

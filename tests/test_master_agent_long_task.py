@@ -148,7 +148,7 @@ def _tool_call_response() -> dict:
     }
 
 
-def _make_agent(llm: RecordingLLM, *, max_rounds: int = 8) -> MasterAgent:
+def _make_agent(llm: RecordingLLM, **kwargs: Any) -> MasterAgent:
     return MasterAgent(
         llm_caller=llm,
         tools=FakeTools(),
@@ -156,7 +156,7 @@ def _make_agent(llm: RecordingLLM, *, max_rounds: int = 8) -> MasterAgent:
         memory=FakeMemory(),
         swarm=FakeSwarm(),
         vault=FakeVault(),
-        max_rounds=max_rounds,
+        **kwargs,
     )
 
 

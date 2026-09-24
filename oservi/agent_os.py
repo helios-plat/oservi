@@ -59,7 +59,6 @@ class AgentOS:
         return {
             "started": self._started,
             "master": {
-                "max_rounds": self.master.max_rounds,
                 "tools": len(self.master.get_all_tool_schemas()),
             },
             "automata_attached": self.automata is not None,
@@ -83,10 +82,10 @@ def build_agent_os(
     rag_factory: Callable[[], Any] | None = None,
     notify: Callable[[dict], None] | None = None,
     cost_calculator: Callable[[dict], float] | None = None,
-    max_rounds: int = 5,
     temperature: float = 0.2,
     automata: Any | None = None,
     rag: Any | None = None,
+    **_legacy_kwargs: Any,
 ) -> AgentOS:
     """Assemble the full Agent OS from host-provided concrete components."""
     master = MasterAgent(
@@ -99,7 +98,6 @@ def build_agent_os(
         automata_factory=automata_factory,
         rag_factory=rag_factory,
         notify=notify,
-        max_rounds=max_rounds,
         temperature=temperature,
         cost_calculator=cost_calculator,
     )

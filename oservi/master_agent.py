@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -274,12 +275,12 @@ class MasterAgent:
         omni_gateway: OmniGatewayProtocol | None = None,
         notify: Callable[[dict], None] | None = None,
         system_prompt: str | None = None,
-        max_rounds: int = 32,
         temperature: float = 0.2,
         cost_calculator: Callable[[dict], float] | None = None,
         sync_runner: Callable | None = None,
         llm_timeout_s: float | None = 120.0,
         post_tool_result_decider: Callable[[dict, str, dict], Any] | None = None,
+        **_legacy_kwargs: Any,
     ):
         """
         Args:
@@ -314,7 +315,6 @@ class MasterAgent:
         self._rag: RagProtocol | None = None
         self.notify = notify or (lambda _e: None)
         self.system_prompt = system_prompt or MASTER_SYSTEM_PROMPT
-        self.max_rounds = max_rounds
         self.temperature = temperature
         # The injected provider is part of the loop boundary.  A provider
         # transport can otherwise outlive the task and make a tool result look
@@ -853,9 +853,9 @@ class MasterAgent:
         user_prompt: str,
         *,
         session_id: str | None = None,
-        max_rounds: int | None = None,
         llm_kwargs: dict[str, Any] | None = None,
         long_task: Any | None = None,
+        **_legacy_kwargs: Any,
     ) -> dict[str, Any]:
         """Master entry: assemble context -> model decides -> tools execute -> synthesize.
 
@@ -866,9 +866,10 @@ class MasterAgent:
         default None = behavior identical to pre-integration). Provides
         ``pre_round()`` / ``post_round()``: every round reads projection + quota
         check before LLM, writes todo/evidence/quota after tool execution.
+
+        Termination is semantic (state-driven), not round-count driven.
         """
         sid = session_id or str(uuid.uuid4())
-        max_rounds = max_rounds or self.max_rounds
 
         # 连续对话: 复用 session 历史 (首条 system 常驻), 新会话则初始化
         messages = self._histories.get(sid)
@@ -886,6 +887,15 @@ class MasterAgent:
         action_results: dict[tuple[str, str], str] = {}
         result_fingerprints: set[tuple[str, str]] = set()
         no_progress_rounds = 0
+        consecutive_errors = 0
+        # Safety: wall-clock deadline (seconds from start)
+        import time
+        start_time = time.monotonic()
+        # Configurable safety limits (can be overridden via env for product tuning)
+        MAX_WALL_TIME_S = float(os.environ.get("VEYA_MAX_WALL_TIME_S", "0") or 0)
+        MAX_CONSECUTIVE_ERRORS = int(os.environ.get("VEYA_MAX_CONSECUTIVE_ERRORS", "5") or 5)
+        MAX_NO_PROGRESS_ROUNDS = int(os.environ.get("VEYA_MAX_NO_PROGRESS_ROUNDS", "3") or 3)
+        MAX_REPEATED_ACTIONS = int(os.environ.get("VEYA_MAX_REPEATED_ACTIONS", "3") or 3)
 
         def stop_after_no_progress(reason: str) -> dict[str, Any]:
             error = f"ReAct loop stopped after repeated no-progress responses: {reason}"
@@ -896,13 +906,13 @@ class MasterAgent:
                     "session_id": sid,
                     "error": error,
                     "round": round_count,
-                    "reason": "repeated_noop",
+                    "reason": "no_progress_detected",
                 }
             )
-            final_answer = f"⚠ {error}"
+            final_answer = f"当前执行没有继续取得有效进展: {reason}"
             messages.append({"role": "assistant", "content": final_answer})
             return {
-                "status": "failed",
+                "status": "no_progress_detected",
                 "error": error,
                 "final_answer": final_answer,
                 "rounds": round_count,
@@ -911,10 +921,43 @@ class MasterAgent:
                 "session_id": sid,
             }
 
-        while round_count < max_rounds:
+        def stop_safety_resource_exhausted(reason: str) -> dict[str, Any]:
+            error = f"Safety resource exhausted: {reason}"
+            _log.warning("[Master %s] %s", sid, error)
+            self.notify(
+                {
+                    "type": "master_paused",
+                    "session_id": sid,
+                    "reason": "safety_resource_exhausted",
+                    "detail": reason,
+                }
+            )
+            final_answer = f"本次执行已暂停 (安全/资源限制: {reason})。可继续运行。"
+            messages.append({"role": "assistant", "content": final_answer})
+            return {
+                "status": "safety_resource_exhausted",
+                "error": error,
+                "final_answer": final_answer,
+                "rounds": round_count,
+                "tool_calls": tool_trace,
+                "cost_usd": round(total_cost, 6),
+                "session_id": sid,
+            }
+
+        while True:
             round_count += 1
-            _log.info("[Master %s] routing round %d/%d", sid, round_count, max_rounds)
+            _log.info("[Master %s] routing round %d", sid, round_count)
             self.notify({"type": "master_round", "session_id": sid, "round": round_count})
+
+            # Safety: wall-clock deadline
+            if MAX_WALL_TIME_S > 0 and (time.monotonic() - start_time) >= MAX_WALL_TIME_S:
+                return stop_safety_resource_exhausted(f"wall-clock deadline exceeded ({MAX_WALL_TIME_S}s)")
+
+            # Safety: consecutive error guard
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                return stop_safety_resource_exhausted(
+                    f"consecutive errors reached limit ({MAX_CONSECUTIVE_ERRORS})"
+                )
 
             # ── 长程任务: 每轮读投影 + 配额检查 (可选钩子, 默认 None 零影响) ──
             if long_task is not None:
@@ -958,6 +1001,7 @@ class MasterAgent:
                         "session_id": sid,
                     }
 
+
             try:
                 response, model_cost = await self._semantic_model_call(
                     messages, llm_kwargs=llm_kwargs
@@ -976,8 +1020,9 @@ class MasterAgent:
                     }
                 )
                 return {
-                    "status": "failed",
+                    "status": "fatal_error",
                     "error": error,
+                    "final_answer": f"⚠ {error}",
                     "rounds": round_count,
                     "tool_calls": tool_trace,
                     "cost_usd": round(total_cost, 6),
@@ -994,8 +1039,9 @@ class MasterAgent:
                     }
                 )
                 return {
-                    "status": "failed",
+                    "status": "fatal_error",
                     "error": f"LLM call failed: {exc}",
+                    "final_answer": f"⚠ LLM 调用失败: {exc}",
                     "rounds": round_count,
                     "tool_calls": tool_trace,
                     "cost_usd": round(total_cost, 6),
@@ -1018,7 +1064,7 @@ class MasterAgent:
                         "reason": reason,
                     }
                 )
-                if no_progress_rounds >= _NO_PROGRESS_LIMIT:
+                if no_progress_rounds >= MAX_NO_PROGRESS_ROUNDS:
                     return stop_after_no_progress(reason)
                 messages.append(
                     {
@@ -1039,7 +1085,7 @@ class MasterAgent:
             if len(messages) > self._history_max_msgs:
                 messages[:] = [messages[0]] + messages[-(self._history_max_msgs - 1) :]
 
-            # 2. Model answers directly (no tool calls) -> done
+            # 2. Model answers directly (no tool calls) -> semantic completion
             if not tool_calls:
                 # An empty response after a physical tool result is not a
                 # final answer. Ask the same model to diagnose/continue once;
@@ -1057,7 +1103,7 @@ class MasterAgent:
                             "reason": reason,
                         }
                     )
-                    if no_progress_rounds >= _NO_PROGRESS_LIMIT:
+                    if no_progress_rounds >= MAX_NO_PROGRESS_ROUNDS:
                         return stop_after_no_progress(reason)
                     messages.append(
                         {
@@ -1081,11 +1127,32 @@ class MasterAgent:
                             + "; 但收尾总结生成失败 (模型返回无效响应), "
                             "以上为实际执行结果。"
                         )
+                        self.notify({"type": "master_done", "session_id": sid, "round": round_count})
+                        return {
+                            "status": "success",
+                            "stop_kind": "invalid_response",
+                            "final_answer": content,
+                            "rounds": round_count,
+                            "tool_calls": tool_trace,
+                            "cost_usd": round(total_cost, 6),
+                            "session_id": sid,
+                        }
                     else:
                         content = "模型未能生成有效回答 (返回无效响应), 请重试或换种说法。"
+                        self.notify({"type": "master_done", "session_id": sid, "round": round_count})
+                        return {
+                            "status": "success",
+                            "stop_kind": "invalid_response",
+                            "final_answer": content,
+                            "rounds": round_count,
+                            "tool_calls": tool_trace,
+                            "cost_usd": round(total_cost, 6),
+                            "session_id": sid,
+                        }
                 self.notify({"type": "master_done", "session_id": sid, "round": round_count})
                 return {
                     "status": "success",
+                    "stop_kind": "completed",
                     "final_answer": content,
                     "rounds": round_count,
                     "tool_calls": tool_trace,
@@ -1151,7 +1218,8 @@ class MasterAgent:
                         "reason": "repeated tool action produced no new progress",
                     }
                 )
-            if no_progress_rounds >= _NO_PROGRESS_LIMIT and not executable_specs:
+            # Safety: repeated action guard
+            if no_progress_rounds >= MAX_REPEATED_ACTIONS and not executable_specs:
                 repeated = ", ".join(sorted({spec[0] for spec in duplicate_specs.values()}))
                 return stop_after_no_progress(f"repeated tool actions: {repeated}")
             _parallel_check = getattr(self.tools, "is_parallel_safe", None)
@@ -1218,6 +1286,7 @@ class MasterAgent:
                 entry[0].get("tool", "") for entry in results if entry[0].get("status") == "failed"
             ]
             if failed_tools:
+                consecutive_errors += len(failed_tools)
                 self.notify(
                     {
                         "type": "master_replan",
@@ -1227,6 +1296,9 @@ class MasterAgent:
                         "reason": "tool failure requires diagnosis and a new action",
                     }
                 )
+            else:
+                # Reset consecutive errors on successful tool execution
+                consecutive_errors = 0
 
             # Different read ranges/limits can still return the same evidence.
             # Treat a consecutive batch with no new result content as no
@@ -1257,7 +1329,7 @@ class MasterAgent:
                             "reason": reason,
                         }
                     )
-                    if no_progress_rounds >= _NO_PROGRESS_LIMIT:
+                    if no_progress_rounds >= MAX_NO_PROGRESS_ROUNDS:
                         return stop_after_no_progress(reason)
                     messages.append(
                         {
@@ -1333,57 +1405,13 @@ class MasterAgent:
                 self.notify({"type": "master_done", "session_id": sid, "round": round_count})
                 return {
                     "status": "success",
+                    "stop_kind": "completed",
                     "final_answer": final_answer,
                     "rounds": round_count,
                     "tool_calls": tool_trace,
                     "cost_usd": round(total_cost, 6),
                     "session_id": sid,
                 }
-
-        # 轮次护栏耗尽 (防物理死循环, 不限制智能): 返回模型最后产出, 不报 HITL。
-        # 大模型全程自由调用工具/直答; 极端情况下预算用尽也把已有内容交还用户。
-        last_content = ""
-        for m in reversed(messages):
-            if m.get("role") == "assistant" and m.get("content"):
-                last_content = m["content"]
-                break
-        self.notify({"type": "master_rounds_exhausted", "session_id": sid, "rounds": round_count})
-        if last_content:
-            return {
-                "status": "success",
-                "final_answer": last_content,
-                "rounds": round_count,
-                "tool_calls": tool_trace,
-                "cost_usd": round(total_cost, 6),
-                "session_id": sid,
-            }
-        # 轮次用尽但执行过工具: 输出工具执行摘要 (不静默 failed) — 用户
-        # 至少看到真实进度, 而非空白失败。与收尾轮 'None' 兜底同一语义。
-        if tool_trace:
-            done = [t.get("tool", "") for t in tool_trace]
-            return {
-                "status": "success",
-                "final_answer": (
-                    "轮次预算已用尽, 已执行 "
-                    + str(len(done))
-                    + " 项工具: "
-                    + ", ".join(done)
-                    + "; 任务仍在进行中 (模型未在轮次内收尾)。"
-                ),
-                "rounds": round_count,
-                "tool_calls": tool_trace,
-                "cost_usd": round(total_cost, 6),
-                "session_id": sid,
-            }
-        return {
-            "status": "failed",
-            "error": "模型未在预算内产出回答 (LLM 未返回内容)。",
-            "rounds": round_count,
-            "tool_calls": tool_trace,
-            "cost_usd": round(total_cost, 6),
-            "session_id": sid,
-            "last_messages": messages[-3:],
-        }
 
     async def chat(self, user_prompt: str, **kwargs: Any) -> dict[str, Any]:
         """Lightweight single-turn chat (no tools)."""
