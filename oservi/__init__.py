@@ -35,6 +35,7 @@ from oservi.engines.agentic_loop import AgenticLoopEngine
 from oservi.engines.action_planner import ActionPlannerEngine
 from oservi.engines.app_installer import AppInstallerEngine
 from oservi.engines.sequential_composer import SequentialComposerEngine
+from oservi.engines.production_execution import ExecutionEvent, ProductionExecutionEngine
 from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
 from oservi.engines.mcp_bridge import McpBridgeEngine
 from oservi.engines.saga_composer import SagaComposerEngine
@@ -67,6 +68,8 @@ __all__ = [
     "ActionPlannerEngine",
     "AppInstallerEngine",
     "SequentialComposerEngine",
+    "ExecutionEvent",
+    "ProductionExecutionEngine",
     "SubagentOrchestratorEngine",
     "McpBridgeEngine",
     "SagaComposerEngine",
