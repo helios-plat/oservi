@@ -46,6 +46,7 @@ from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
 from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
 
 __all__ = [
+    "__manifest__",
     "__version__",
     # Manifest
     "ServiceManifest",
@@ -84,3 +85,27 @@ from oservi.engines.channel_watcher import ChannelWatcherEngine
 from oservi.engines.arxiv_watcher import ArxivWatcherEngine
 
 from oservi.engines.source_watcher import SourceWatcherEngine
+
+
+__manifest__ = {
+    "package": 'oservi',
+    "version": __version__,
+    "elements": [
+        {
+            "name": 'ProductionExecutionEngine',
+            "kind": 'oservi',
+            "module": 'oservi.engines.production_execution',
+            "signature": 'run(*, input_data, output_dir, config=None) -> dict',
+            "depends_on": ['omodul.operation'],
+            "pillars": ['cost', 'fingerprint', 'trail', 'report'],
+        },
+        {
+            "name": 'SequentialComposerEngine',
+            "kind": 'oservi',
+            "module": 'oservi.engines.sequential_composer',
+            "signature": 'run(input_data) -> dict',
+            "depends_on": ['omodul.operation'],
+            "pillars": ['cost', 'fingerprint', 'trail', 'report'],
+        },
+    ],
+}
