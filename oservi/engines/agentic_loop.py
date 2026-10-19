@@ -30,7 +30,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -52,7 +53,8 @@ class AgenticLoopEngine(EngineSkeleton):
     - 任务完成 / 超限 → on_task_done 回调
 
     业务 (注入填料):
-    - llm_provider: ReAct 推理, 接收 (task, context, history) → 返回 {thought, action, tool_name, tool_args, final_answer}
+    - llm_provider: ReAct 推理, 接收 (task, context, history)
+      → 返回 {thought, action, tool_name, tool_args, final_answer}
     - tools: oprim 工具列表, 各工具 callable 接收 **kwargs → 返回 Any
     - knowledge_retrieval: oskill callable, 接收 (query) → 返回 context str
 
@@ -164,7 +166,9 @@ class AgenticLoopEngine(EngineSkeleton):
             turn_result = {"messages": messages}
 
         # 2. call llm_caller
-        processed_messages = turn_result.get("messages", messages) if isinstance(turn_result, dict) else messages
+        processed_messages = (
+            turn_result.get("messages", messages) if isinstance(turn_result, dict) else messages
+        )
         available_tools = tools or list(self.tools.values())
         try:
             if inspect.iscoroutinefunction(self.llm_caller):
@@ -219,7 +223,7 @@ class AgenticLoopEngine(EngineSkeleton):
                         self.on_task_done(result)
                     except Exception as e:
                         logger.warning(f"on_task_done callback failed: {e}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 self._last_error = f"{type(e).__name__}: {e}"
@@ -259,6 +263,123 @@ class AgenticLoopEngine(EngineSkeleton):
                 "last_error": self._last_error,
             },
         }
+
+    # =======================================================================
+    # WAVE C — verified long-horizon loop (扩展 AgenticLoopEngine,不新增引擎)
+    # -----------------------------------------------------------------------
+    # 核心规则: executor result != trusted progress. 只有 verifier(result)
+    # == ACCEPTED 才能进入 verified state. REJECTED 不进 checkpoint,只存
+    # failure evidence,下一 round 从 last accepted checkpoint 恢复,输入为
+    # fresh-context (goal + verified state + remaining + evidence + next step)。
+    # 本机制只持内存运行态,不持 GoalRun authority / AgentSession DB / 项目持久化。
+    # =======================================================================
+
+    async def run_verified(
+        self,
+        goal: str,
+        executor: Callable[[dict[str, Any]], Any],
+        verifier: Callable[[dict[str, Any]], Any],
+        *,
+        max_rounds: int = 5,
+        is_complete: Callable[[dict[str, Any]], bool] | None = None,
+    ) -> dict[str, Any]:
+        """执行 verified long-horizon loop,返回 ledger 与最终 verified state。"""
+        if not goal:
+            raise ValueError("run_verified: goal must not be empty")
+        ledger: list[dict[str, Any]] = []
+        verified_state: dict[str, Any] = {}
+        failure_evidence: list[dict[str, Any]] = []
+        final_status = "COMPLETED"
+        rounds_executed = 0
+
+        try:
+            for round_no in range(1, max_rounds + 1):
+                rounds_executed = round_no
+                ledger.append({"round": round_no, "status": "RUNNING"})
+                fresh_context = {
+                    "original_goal": goal,
+                    "verified_state": dict(verified_state),
+                    "remaining_work": goal if not verified_state else "continue toward goal",
+                    "failure_evidence": list(failure_evidence),
+                    "bounded_next_step": f"round {round_no}/{max_rounds}",
+                }
+                try:
+                    raw = executor(fresh_context)
+                    result = await raw if inspect.iscoroutine(raw) else raw
+                except Exception as exc:
+                    result = {"error": f"{type(exc).__name__}: {exc}"}
+                if not isinstance(result, dict):
+                    result = {"output": result}
+                ledger[-1]["status"] = "VERIFYING"
+                try:
+                    vraw = verifier(result)
+                    verdict = await vraw if inspect.iscoroutine(vraw) else vraw
+                except Exception as exc:
+                    verdict = {"accepted": False, "reason": f"verifier error: {exc}"}
+                accepted = self._verdict_accepted(verdict)
+                if accepted:
+                    verified_state = self._merge_verified(verified_state, result)
+                    ledger[-1]["status"] = "ACCEPTED"
+                    ledger[-1]["checkpoint"] = dict(verified_state)
+                    if is_complete is None or is_complete(verified_state):
+                        break
+                else:
+                    evidence = {
+                        "round": round_no,
+                        "result": result,
+                        "reason": self._verdict_reason(verdict),
+                    }
+                    failure_evidence.append(evidence)
+                    ledger[-1]["status"] = "REJECTED"
+                    ledger[-1]["evidence"] = evidence
+                    # RECOVERING:从 last accepted checkpoint 恢复 (verified_state 本就未动)
+                    ledger.append(
+                        {
+                            "round": round_no,
+                            "status": "RECOVERING",
+                            "recovered_checkpoint": dict(verified_state),
+                        }
+                    )
+        except asyncio.CancelledError:
+            final_status = "CANCELLED"
+            ledger.append({"round": rounds_executed + 1, "status": "CANCELLED"})
+            raise
+        return {
+            "status": final_status,
+            "goal": goal,
+            "verified_state": verified_state,
+            "failure_evidence": failure_evidence,
+            "round_ledger": ledger,
+            "rounds_executed": rounds_executed,
+        }
+
+    @staticmethod
+    def _verdict_accepted(verdict: Any) -> bool:
+        if isinstance(verdict, bool):
+            return verdict
+        if isinstance(verdict, dict):
+            return bool(verdict.get("accepted", False))
+        if isinstance(verdict, str):
+            return verdict.strip().upper() == "ACCEPTED"
+        return False
+
+    @staticmethod
+    def _verdict_reason(verdict: Any) -> str:
+        if isinstance(verdict, dict):
+            return str(verdict.get("reason", "rejected"))
+        if isinstance(verdict, str):
+            return verdict
+        return "rejected"
+
+    @staticmethod
+    def _merge_verified(verified_state: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(verified_state)
+        progress = result.get("progress")
+        if isinstance(progress, dict):
+            merged.update(progress)
+        elif "output" in result:
+            merged.setdefault("outputs", []).append(result["output"])
+        return merged
 
 
 register_skeleton("agentic_loop", AgenticLoopEngine)

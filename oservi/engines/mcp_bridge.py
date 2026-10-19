@@ -24,7 +24,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -71,6 +72,11 @@ class McpBridgeEngine(EngineSkeleton):
             cardinality="1",
             description="Tool registry",
         ),
+        "client": Injection(
+            kind="obase",
+            cardinality="0..1",
+            description="MCP client handle (skills 扩展: expose/consume 远端 skills)",
+        ),
     }
     trigger_mode: str = "on_demand"
 
@@ -83,11 +89,13 @@ class McpBridgeEngine(EngineSkeleton):
         trigger: dict[str, Any],
         config: dict[str, Any],
         name: str,
+        client: Any | None = None,
     ) -> None:
         self.name = name
         self.connect = connect
         self.call_primitives: list[Callable[..., Any]] = call if isinstance(call, list) else [call]
         self.registry = registry
+        self.client = client
         self.trigger = trigger
         self.config = config
 
@@ -135,7 +143,9 @@ class McpBridgeEngine(EngineSkeleton):
                 else:
                     reg_result = raw
             # registry returns index or callable reference
-            primitive_idx = reg_result.get("primitive_idx", 0) if isinstance(reg_result, dict) else 0
+            primitive_idx = (
+                reg_result.get("primitive_idx", 0) if isinstance(reg_result, dict) else 0
+            )
         except Exception as e:
             logger.warning(f"McpBridgeEngine registry lookup failed for '{tool_name}': {e}")
             primitive_idx = 0
@@ -178,6 +188,113 @@ class McpBridgeEngine(EngineSkeleton):
             self._last_error = f"{type(e).__name__}: {e}"
             logger.warning(f"McpBridgeEngine connect failed: {e}")
             return {"status": "error", "error": str(e)}
+
+    # ===== skills 扩展 (WAVE B: expose/consume 远端 skills,无业务持久化) =====
+
+    def _require_client(self) -> Any:
+        if self.client is None:
+            raise RuntimeError("McpBridgeEngine: no MCP client injected for skills extension")
+        return self.client
+
+    async def expose_remote_skills(self) -> dict[str, Any]:
+        """暴露远端 skills:经注入 client 发现并经 registry 路由注册 (只路由,不持久化)。
+
+        直接走 client handle Protocol (list_tools/call_tool),保持引擎骨架
+        零跨包导入 (红线 5);形状归一约定与 substrate 一致。
+        """
+        client = self._require_client()
+        extension = "io.modelcontextprotocol/skills"
+        skills: list[dict[str, Any]] = []
+        via = "none"
+        extensions = getattr(client, "extensions", None)
+        if isinstance(extensions, (list, tuple, set)) and extension in set(extensions):
+            via = "extensions"
+        # 有声明也照常拉取 skill 列表;无声明则探测 skill_list / tools 面
+        try:
+            probed = client.call_tool("skill_list", {})
+            if inspect.iscoroutine(probed):
+                probed = await probed
+            if isinstance(probed, dict) and isinstance(probed.get("skills"), list):
+                if via == "none":
+                    via = "skill_list"
+                skills = [s for s in probed["skills"] if isinstance(s, dict)]
+            elif isinstance(probed, list):
+                if via == "none":
+                    via = "skill_list"
+                skills = [s for s in probed if isinstance(s, dict)]
+        except Exception:
+            probed = None
+        if not skills and via == "none":
+            try:
+                tools = client.list_tools()
+                if inspect.iscoroutine(tools):
+                    tools = await tools
+                skills = [
+                    t
+                    for t in tools
+                    if isinstance(t, dict) and str(t.get("name", "")).startswith("skill")
+                ]
+                if skills:
+                    via = "tools"
+            except Exception as exc:
+                return {
+                    "status": "error",
+                    "skills": [],
+                    "negotiation": {
+                        "supported": False,
+                        "via": "none",
+                        "extension": extension,
+                        "error": str(exc),
+                    },
+                }
+        negotiation = {"supported": via != "none", "via": via, "extension": extension}
+        if not negotiation["supported"]:
+            return {"status": "unsupported", "skills": [], "negotiation": negotiation}
+        normalized = [
+            {
+                "name": str(s.get("name") or s.get("skill_id") or ""),
+                "version": str(s.get("version", "")),
+                "description": str(s.get("description", "")),
+                "inputs": s.get("input_schema") or s.get("inputSchema") or {},
+                "outputs": s.get("outputs") or {},
+                "extension": extension,
+            }
+            for s in skills
+        ]
+        exposed: list[str] = []
+        for skill in normalized:
+            name = str(skill["name"])
+            if not name:
+                continue
+            try:
+                route = self.registry(tool_name=name)
+                if inspect.iscoroutine(route):
+                    await route
+            except Exception:
+                pass
+            exposed.append(name)
+        return {
+            "status": "ok",
+            "skills": normalized,
+            "exposed": exposed,
+            "negotiation": negotiation,
+        }
+
+    async def consume_remote_skill(
+        self, skill_id: str, args: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """消费远端 skill:经注入 client 直接调用 (lifecycle 经 client,不落业务库)。"""
+        client = self._require_client()
+        if not skill_id:
+            raise ValueError("consume_remote_skill: skill_id must not be empty")
+        call_tool = getattr(client, "call_tool", None)
+        if call_tool is None:
+            raise RuntimeError("McpBridgeEngine: injected client has no call_tool")
+        result = call_tool(skill_id, args or {})
+        if inspect.iscoroutine(result):
+            result = await result
+        self._call_count += 1
+        return {"status": "ok", "skill_id": skill_id, "result": result}
 
     # ===== 健康检查 =====
 

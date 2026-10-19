@@ -14,40 +14,38 @@ Phase 1:
 引擎骨架准入 5 红线见 docs/GOVERNANCE.md
 """
 
+# 引擎自动导入触发 register_skeleton
+from oservi.engines import alerter as _alerter  # noqa: F401
+from oservi.engines import dag_orchestrator as _dag_orchestrator  # noqa: F401
+from oservi.engines import feed_tracker as _feed_tracker  # noqa: F401
+from oservi.engines import mcp_bridge as _mcp_bridge  # noqa: F401
+from oservi.engines import mechanism_game_loop as _mechanism_game_loop  # noqa: F401
+from oservi.engines import realtime_media_loop as _realtime_media_loop  # noqa: F401
+from oservi.engines import researcher as _researcher  # noqa: F401
+from oservi.engines import sequential_composer as _sequential_composer  # noqa: F401
+from oservi.engines import steerable_agentic_loop as _steerable_agentic_loop  # noqa: F401
+from oservi.engines import subagent_orchestrator as _subagent_orchestrator  # noqa: F401
+from oservi.engines import swarm_orchestrator as _swarm_orchestrator  # noqa: F401
+from oservi.engines import world_simulation_loop as _world_simulation_loop  # noqa: F401
 from oservi.engines._base import (
     EngineSkeleton,
     Injection,
-    register_skeleton,
     get_skeleton,
     list_skeletons,
+    register_skeleton,
 )
-
-# 引擎自动导入触发 register_skeleton
-from oservi.engines import alerter as _alerter  # noqa: F401
-from oservi.engines import researcher as _researcher  # noqa: F401
-from oservi.engines import feed_tracker as _feed_tracker  # noqa: F401
-from oservi.engines import sequential_composer as _sequential_composer  # noqa: F401
-from oservi.engines import subagent_orchestrator as _subagent_orchestrator  # noqa: F401
-from oservi.engines import mcp_bridge as _mcp_bridge  # noqa: F401
-from oservi.engines import saga_composer as _saga_composer  # noqa: F401
-from oservi.engines import state_machine_engine as _state_machine_engine  # noqa: F401
-from oservi.engines import event_webhook_dispatcher as _event_webhook_dispatcher  # noqa: F401
-from oservi.engines import cron_scheduler_engine as _cron_scheduler_engine  # noqa: F401
-from oservi.engines import bulk_import_worker as _bulk_import_worker  # noqa: F401
-from oservi.engines import bulk_export_worker as _bulk_export_worker  # noqa: F401
-
 from oservi.engines.alerter import AlerterEngine
-from oservi.engines.researcher import ResearcherEngine
+from oservi.engines.dag_orchestrator import DagOrchestratorEngine
 from oservi.engines.feed_tracker import FeedTrackerEngine
-from oservi.engines.sequential_composer import SequentialComposerEngine
-from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
 from oservi.engines.mcp_bridge import McpBridgeEngine
-from oservi.engines.saga_composer import SagaComposerEngine
-from oservi.engines.state_machine_engine import StateMachineEngine
-from oservi.engines.event_webhook_dispatcher import EventWebhookDispatcherEngine
-from oservi.engines.cron_scheduler_engine import CronSchedulerEngine
-from oservi.engines.bulk_import_worker import BulkImportWorkerEngine
-from oservi.engines.bulk_export_worker import BulkExportWorkerEngine
+from oservi.engines.mechanism_game_loop import MechanismGameLoopEngine
+from oservi.engines.realtime_media_loop import RealtimeMediaLoopEngine
+from oservi.engines.researcher import ResearcherEngine
+from oservi.engines.sequential_composer import SequentialComposerEngine
+from oservi.engines.steerable_agentic_loop import SteerableAgenticLoopEngine
+from oservi.engines.subagent_orchestrator import SubagentOrchestratorEngine
+from oservi.engines.swarm_orchestrator import SwarmOrchestratorEngine
+from oservi.engines.world_simulation_loop import WorldSimulationLoopEngine
 
 __all__ = [
     "EngineSkeleton",
@@ -61,10 +59,10 @@ __all__ = [
     "SequentialComposerEngine",
     "SubagentOrchestratorEngine",
     "McpBridgeEngine",
-    "SagaComposerEngine",
-    "StateMachineEngine",
-    "EventWebhookDispatcherEngine",
-    "CronSchedulerEngine",
-    "BulkImportWorkerEngine",
-    "BulkExportWorkerEngine",
+    "DagOrchestratorEngine",
+    "SteerableAgenticLoopEngine",
+    "SwarmOrchestratorEngine",
+    "RealtimeMediaLoopEngine",
+    "MechanismGameLoopEngine",
+    "WorldSimulationLoopEngine",
 ]
