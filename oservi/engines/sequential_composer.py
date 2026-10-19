@@ -107,14 +107,9 @@ class SequentialComposerEngine(EngineSkeleton):
 
         for i, step in enumerate(self.step_list):
             try:
-                if inspect.iscoroutinefunction(step):
-                    result = await step(input_data=input_data, step_no=i)
-                else:
-                    raw = step(input_data=input_data, step_no=i)
-                    if asyncio.iscoroutine(raw):
-                        result = await raw
-                    else:
-                        result = raw
+                result = self._invoke_step(step, i, input_data, output_dir)
+                if inspect.isawaitable(result):
+                    result = await result
             except Exception as e:
                 self._last_error = f"step {i} {getattr(step, '__name__', step)}: {type(e).__name__}: {e}"
                 logger.warning(f"SequentialComposerEngine '{self.name}' step {i} failed: {e}")
@@ -129,6 +124,34 @@ class SequentialComposerEngine(EngineSkeleton):
                     logger.warning(f"on_step callback failed at step {i}: {cb_err}")
 
         return {"status": "completed", "results": results}
+
+    def _invoke_step(
+        self,
+        step: Callable[..., Any],
+        step_no: int,
+        input_data: dict[str, Any],
+        output_dir: Any,
+    ) -> Any:
+        """适配两种步骤形态：
+        1. omodul 标准签名 (config, input_data, output_dir, *, on_step)
+           —— 编排 omodul 协作的正道；config 取引擎 config
+        2. 通用 callable (input_data, step_no)
+        """
+        try:
+            sig = inspect.signature(step)
+            positional = [
+                p
+                for p in sig.parameters.values()
+                if p.kind
+                in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            ]
+        except (TypeError, ValueError):  # pragma: no cover - builtin 等
+            positional = []
+
+        if len(positional) >= 3:
+            # omodul 标准三件套 (config, input_data, output_dir)
+            return step(self.config, input_data, output_dir)
+        return step(input_data=input_data, step_no=step_no)
 
     def stop(self) -> None:
         """Signal the engine to stop (no-op for on_demand engines)."""
