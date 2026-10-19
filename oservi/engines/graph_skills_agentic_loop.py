@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -230,7 +231,7 @@ class GraphSkillsAgenticLoopEngine(EngineSkeleton):
                         self.on_task_done(result)
                     except Exception as e:
                         logger.warning(f"on_task_done callback failed: {e}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 self._last_error = f"{type(e).__name__}: {e}"

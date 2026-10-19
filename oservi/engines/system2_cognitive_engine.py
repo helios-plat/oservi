@@ -16,7 +16,8 @@
 红线对照:
 - 红线 1 (≥2 实证): Veya O1→O2→O3 + Hicode Agent ✅
 - 红线 2 (机制/业务分离): LLM 与 omodul 全靠注入
-- 红线 3 (注入契约): llm_caller=oprim(1) / o1_omodul=omodul(1) / o2_omodul=omodul(1) / o3_omodul=omodul(0..1)
+- 红线 3 (注入契约): llm_caller=oprim(1) / o1_omodul=omodul(1)
+  / o2_omodul=omodul(1) / o3_omodul=omodul(0..1)
 - 红线 4 (无状态骨架): 状态只在 System2CognitiveEngine 实例
 - 红线 5 (不反向依赖): 本文件不 import oprim/oskill/omodul 具体模块
 """
@@ -25,7 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -225,7 +227,9 @@ class System2CognitiveEngine(EngineSkeleton):
                 },
                 "o2_result": {
                     "status": o2_result.get("status"),
-                    "assignments": o2_result.get("pillars", {}).get("report", {}).get("assignments", []),
+                    "assignments": o2_result.get("pillars", {})
+                    .get("report", {})
+                    .get("assignments", []),
                     "total_cost": o2_result.get("pillars", {}).get("report", {}).get("total_cost"),
                 },
                 "o3_result": o3_result.get("status") if o3_result else "skipped",
@@ -323,11 +327,11 @@ class System2CognitiveEngine(EngineSkeleton):
                         self.on_task_done(result)
                     except Exception as e:
                         logger.warning(f"on_task_done failed: {e}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 self._last_error = f"{type(e).__name__}: {e}"
-                logger.exception(f"System2CognitiveEngine task failed")
+                logger.exception("System2CognitiveEngine task failed")
 
     def health(self) -> dict[str, Any]:
         return {

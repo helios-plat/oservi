@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from obase.daemon_bus import InProcessDaemonBus
+
 from oservi import DaemonEngine
 from oservi.agentic_loop import AgenticLoopEngine as MinimalAgenticLoopEngine
 from oservi.engine_manifest import InjectionKind, ServiceManifest, TriggerMode

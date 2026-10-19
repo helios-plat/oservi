@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -176,7 +177,9 @@ class LongHorizonAgenticLoopEngine(EngineSkeleton):
                     comp_res = self.compressor_sk(
                         history,
                         llm_caller=self.llm_caller,
-                    ) if callable(self.compressor_sk) else {"compressed": False, "compacted_history": history}
+                    ) if callable(self.compressor_sk) else {
+                        "compressed": False, "compacted_history": history
+                    }
 
                     if isinstance(comp_res, dict) and comp_res.get("compressed"):
                         history = comp_res["compacted_history"]
@@ -264,7 +267,7 @@ class LongHorizonAgenticLoopEngine(EngineSkeleton):
                         self.on_task_done(result)
                     except Exception as e:
                         logger.warning(f"on_task_done callback failed: {e}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 self._last_error = f"{type(e).__name__}: {e}"

@@ -30,7 +30,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -52,7 +53,8 @@ class AgenticLoopEngine(EngineSkeleton):
     - 任务完成 / 超限 → on_task_done 回调
 
     业务 (注入填料):
-    - llm_provider: ReAct 推理, 接收 (task, context, history) → 返回 {thought, action, tool_name, tool_args, final_answer}
+    - llm_provider: ReAct 推理, 接收 (task, context, history)
+      → 返回 {thought, action, tool_name, tool_args, final_answer}
     - tools: oprim 工具列表, 各工具 callable 接收 **kwargs → 返回 Any
     - knowledge_retrieval: oskill callable, 接收 (query) → 返回 context str
 
@@ -221,7 +223,7 @@ class AgenticLoopEngine(EngineSkeleton):
                         self.on_task_done(result)
                     except Exception as e:
                         logger.warning(f"on_task_done callback failed: {e}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 self._last_error = f"{type(e).__name__}: {e}"

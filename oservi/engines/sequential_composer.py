@@ -21,7 +21,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -111,7 +112,10 @@ class SequentialComposerEngine(EngineSkeleton):
                 if inspect.isawaitable(result):
                     result = await result
             except Exception as e:
-                self._last_error = f"step {i} {getattr(step, '__name__', step)}: {type(e).__name__}: {e}"
+                self._last_error = (
+                    f"step {i} {getattr(step, '__name__', step)}: "
+                    f"{type(e).__name__}: {e}"
+                )
                 logger.warning(f"SequentialComposerEngine '{self.name}' step {i} failed: {e}")
                 result = {"error": str(e), "step_no": i}
 

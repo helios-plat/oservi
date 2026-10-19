@@ -6,7 +6,6 @@ Covers: mechanism_game_loop（博弈竞价调度引擎）.
 from __future__ import annotations
 
 
-
 async def _bid_a(task):
     return 10
 

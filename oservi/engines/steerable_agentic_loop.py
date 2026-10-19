@@ -22,7 +22,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -312,7 +313,11 @@ def _resp_text(response: dict[str, Any]) -> str:
 
 def _looks_final(text: str) -> bool:
     lowered = text.strip().lower()
-    return lowered.startswith("final:") or lowered.startswith("answer:") or lowered.startswith("结论:")
+    return (
+        lowered.startswith("final:")
+        or lowered.startswith("answer:")
+        or lowered.startswith("结论:")
+    )
 
 
 def _parse_action(text: str) -> tuple[str | None, dict[str, Any]]:

@@ -21,7 +21,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, AsyncIterator, Callable, ClassVar
+from collections.abc import AsyncIterator, Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -110,7 +111,10 @@ class RealtimeMediaLoopEngine(EngineSkeleton):
     ) -> dict[str, Any]:
         """持续拉帧处理直到 stop() / 源耗尽 / max_iterations。"""
         input_data = input_data or {}
-        max_iterations = int(input_data.get("max_iterations") or self.config.get("max_iterations", 1000))
+        max_iterations = int(
+            input_data.get("max_iterations")
+            or self.config.get("max_iterations", 1000)
+        )
         ctx: dict[str, Any] = {"loop": self.name, "iteration": 0}
         self._running = True
         self._stop_event.clear()
@@ -127,7 +131,11 @@ class RealtimeMediaLoopEngine(EngineSkeleton):
                     break
                 except Exception as exc:
                     self._last_error = f"source: {type(exc).__name__}: {exc}"
-                    return {"status": "error", "reason": self._last_error, "iterations": self._iterations}
+                    return {
+                        "status": "error",
+                        "reason": self._last_error,
+                        "iterations": self._iterations,
+                    }
 
                 ctx["iteration"] = self._iterations
                 try:
@@ -170,7 +178,7 @@ class RealtimeMediaLoopEngine(EngineSkeleton):
                 def __init__(self, source: Any) -> None:
                     self._source = source
 
-                def __aiter__(self) -> "_Adapter":
+                def __aiter__(self) -> _Adapter:
                     return self
 
                 async def __anext__(self) -> Any:

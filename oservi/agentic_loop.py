@@ -35,13 +35,12 @@ import inspect
 import json
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 from oservi.manifest import ServiceManifest
-
 
 # ---------------------------------------------------------------------------
 # InjectionKind / Injection 契约（§8.3）
@@ -76,7 +75,7 @@ class EngineSkeleton:
         self._tick_count = 0
         self._injected: dict[str, Any] = {}
 
-    def assemble(self, **kwargs) -> "EngineSkeleton":
+    def assemble(self, **kwargs) -> EngineSkeleton:
         """
         装配注入点。检查 required（cardinality="1" 或 "1..n"）是否满足。
         返回 self 以支持链式调用。
@@ -150,7 +149,10 @@ class AgenticLoop(EngineSkeleton):
     injection_points = {
         "llm_caller": Injection(
             kind="oprim", cardinality="1",
-            description="主 LLM 调用，callable(messages, tools, max_tokens, thinking_budget) -> dict"
+            description=(
+                "主 LLM 调用，callable(messages, tools, max_tokens, thinking_budget) "
+                "-> dict"
+            )
         ),
         "tools": Injection(
             kind="layer4", cardinality="1..n",
@@ -230,7 +232,7 @@ class AgenticLoop(EngineSkeleton):
             return [t for t in tools if t.readonly]
         return tools
 
-    def _hook(self, event: str, payload: dict) -> "asyncio.coroutine":
+    def _hook(self, event: str, payload: dict) -> asyncio.coroutine:
         dispatch = self._injected.get("hook_dispatch")
         if dispatch:
             return dispatch(event, payload)
@@ -649,7 +651,10 @@ def _build_system(
     parts = [base] if base else ["You are hicode, an expert AI coding agent."]
     parts.append(f"Mode: {mode.upper()}.")
     if mode == "plan":
-        parts.append("In PLAN mode: analyze and propose changes only. Do NOT write files or run commands.")
+        parts.append(
+            "In PLAN mode: analyze and propose changes only. "
+            "Do NOT write files or run commands."
+        )
     if extra_context:
         parts.append(f"\n## Skills\n{extra_context}")
     return "\n\n".join(parts)

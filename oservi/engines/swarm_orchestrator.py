@@ -20,7 +20,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from oservi.engines._base import (
     EngineSkeleton,
@@ -148,9 +149,21 @@ class SwarmOrchestratorEngine(EngineSkeleton):
         input_data = input_data or {}
         tasks = input_data.get("tasks") or []
         if not tasks:
-            return {"status": "failed", "error": "no tasks", "assigned": {}, "results": {}, "errors": {}}
+            return {
+                "status": "failed",
+                "error": "no tasks",
+                "assigned": {},
+                "results": {},
+                "errors": {},
+            }
         if not self.workers:
-            return {"status": "failed", "error": "no workers", "assigned": {}, "results": {}, "errors": {}}
+            return {
+                "status": "failed",
+                "error": "no workers",
+                "assigned": {},
+                "results": {},
+                "errors": {},
+            }
 
         payloads = {
             str(t.get("id", f"task{i}")): t.get("payload", {})
@@ -159,7 +172,9 @@ class SwarmOrchestratorEngine(EngineSkeleton):
         assignments = await self._assign(tasks, payloads)
         await self._emit("swarm.dispatch", {"assignments": assignments})
 
-        max_parallel = max(1, int(input_data.get("max_parallel") or self.config.get("max_parallel", 4)))
+        max_parallel = max(
+            1, int(input_data.get("max_parallel") or self.config.get("max_parallel", 4))
+        )
         timeout_seconds = self.config.get("timeout_seconds")
         sem = asyncio.Semaphore(max_parallel)
         results: dict[str, Any] = {}

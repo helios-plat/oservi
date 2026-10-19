@@ -6,7 +6,6 @@ Covers: world_simulation_loop（System-2 世界模型推演引擎）.
 from __future__ import annotations
 
 
-
 def _planner(task_goal, *, llm_caller, num_simulations=3, rollout_depth=3):
     return {
         "best_plan": ["step1", "step2"],

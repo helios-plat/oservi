@@ -9,7 +9,6 @@ import pytest
 
 from oservi import LongHorizonAgenticLoopEngine, list_skeletons
 
-
 # ============================================================================
 # Fake injectables
 # ============================================================================
@@ -112,7 +111,8 @@ class TestLongHorizonAgenticLoop:
         long_history = []
         for i in range(8):
             long_history.append({"role": "user", "content": f"msg {i}"})
-            long_history.append({"role": "assistant", "content": f"reply {i}"})  # 16 messages, well over max_history=10
+            # 16 messages, well over max_history=10
+            long_history.append({"role": "assistant", "content": f"reply {i}"})
         store.load_checkpoint.return_value = {
             "session_id": "sess-3",
             "step_index": 0,

@@ -9,7 +9,6 @@ import pytest
 
 from oservi import GraphSkillsAgenticLoopEngine, list_skeletons
 
-
 # ============================================================================
 # Fake injectables
 # ============================================================================
