@@ -14,7 +14,7 @@
 完整治理: docs/GOVERNANCE.md
 """
 
-__version__ = "1.4.0"
+__version__ = "1.1.0"
 
 from oservi.manifest import ServiceManifest, ManifestValidationError
 from oservi.assembler import assemble, validate_manifest
@@ -32,6 +32,10 @@ from oservi.engines.researcher import ResearcherEngine
 from oservi.engines.feed_tracker import FeedTrackerEngine
 from oservi.engines.triage import TriageEngine
 from oservi.engines.agentic_loop import AgenticLoopEngine
+from oservi.daemon_engine import DaemonEngine
+from oservi.mcp_graft import GraftMcpTools
+from oservi.memory_api import MemoryApi
+from oservi.sft_exporter import build_sft_records, export_trajectories
 from oservi.engines.action_planner import ActionPlannerEngine
 from oservi.engines.app_installer import AppInstallerEngine
 from oservi.engines.sequential_composer import SequentialComposerEngine
@@ -64,6 +68,11 @@ __all__ = [
     "FeedTrackerEngine",
     "TriageEngine",
     "AgenticLoopEngine",
+    "DaemonEngine",
+    "GraftMcpTools",
+    "MemoryApi",
+    "build_sft_records",
+    "export_trajectories",
     "ActionPlannerEngine",
     "AppInstallerEngine",
     "SequentialComposerEngine",
@@ -75,9 +84,18 @@ __all__ = [
     "CronSchedulerEngine",
     "BulkImportWorkerEngine",
     "BulkExportWorkerEngine",
+    "ChannelWatcherEngine",
+    "ArxivWatcherEngine",
+    "SourceWatcherEngine",
+    "LongHorizonAgenticLoopEngine",
+    "GraphSkillsAgenticLoopEngine",
+    "System2CognitiveEngine",
 ]
 
 from oservi.engines.channel_watcher import ChannelWatcherEngine
 from oservi.engines.arxiv_watcher import ArxivWatcherEngine
 
 from oservi.engines.source_watcher import SourceWatcherEngine
+from oservi.engines.long_horizon_agentic_loop import LongHorizonAgenticLoopEngine
+from oservi.engines.graph_skills_agentic_loop import GraphSkillsAgenticLoopEngine
+from oservi.engines.system2_cognitive_engine import System2CognitiveEngine
