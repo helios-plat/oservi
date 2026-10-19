@@ -40,6 +40,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from oservi.manifest import ServiceManifest
+
 
 # ---------------------------------------------------------------------------
 # InjectionKind / Injection 契约（§8.3）
@@ -669,3 +671,66 @@ def _error_result(reason: str, state: SessionState) -> dict:
         "session_id": state.session_id,
         "events": [{"ts": time.time(), "event": "error", "reason": reason}],
     }
+
+
+# ===========================================================================
+# 3O Paradigm 全栈 — 极简 manifest 驱动版 AgenticLoopEngine (元素 26)
+# ---------------------------------------------------------------------------
+# 与 engines/agentic_loop.py 的富 ReAct 引擎并存 (后者经 oservi 包根导出);
+# 本类严格按 v3.0 规范的最小契约实现: 三注入点 + run(initial_prompt) 循环。
+# 使用方: from oservi.agentic_loop import AgenticLoopEngine
+# ===========================================================================
+
+
+class AgenticLoopEngine:
+    """
+    v3.0 规范中的 agentic_loop 引擎骨架。
+    它只懂循环机制 (Loop mechanism)，所有具体能力均通过 manifest 注入。
+    """
+
+    def __init__(self, manifest: ServiceManifest):
+        # 验证注入契约 (依赖倒置)
+        self.llm_caller = manifest.inject.get("llm_caller", [None])[0]
+        self.tool_pipeline_modul = manifest.inject.get("tool_pipeline", [None])[0]
+        self.stop_evaluator = manifest.inject.get("stop_evaluator", [None])[0]
+        self.history: list[dict[str, Any]] = []
+
+        if not all([self.llm_caller, self.tool_pipeline_modul, self.stop_evaluator]):
+            raise ValueError("Missing required injections for AgenticLoopEngine")
+
+        # 机制级安全上限 (manifest.config 可覆写; 业务停止由 stop_evaluator 裁决)
+        self.max_turns = int(manifest.config.get("max_turns", 25))
+
+    async def run(self, initial_prompt: str) -> dict[str, Any]:
+        """非阻塞 on_demand 触发的主循环"""
+        self.history.append({"role": "user", "content": initial_prompt})
+        turn = 0
+
+        while True:
+            turn += 1
+            # 1. 触发注入的 oprim (调用 LLM)
+            response = await self.llm_caller(messages=self.history)
+            raw_text = response.get("content", "")
+            self.history.append({"role": "assistant", "content": raw_text})
+
+            # 2. 触发注入的 oskill (判断停止)
+            if self.stop_evaluator(raw_text, turn):
+                break
+
+            if turn >= self.max_turns:
+                break
+
+            # 3. 触发注入的 omodul (安全执行工具事务)
+            # config/input_data 的组装由注入方完成 (注入的 adapter 已绑定
+            # 三件套与依赖, 引擎只传原始文本)
+            tool_result = await self.tool_pipeline_modul(raw_text)
+
+            # 将执行结果喂回循环
+            self.history.append(
+                {
+                    "role": "tool",
+                    "content": str(tool_result.get("findings", tool_result.get("error"))),
+                }
+            )
+
+        return {"final_history": self.history}
