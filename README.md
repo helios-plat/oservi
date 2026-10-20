@@ -77,3 +77,7 @@ v0.1.0 (Initial). Phase 1 alerter 引擎实施中.
 - oskill v3.8.0
 - omodul v1.15.0
 - Python 3.14
+
+## Gloom 3O CLI
+
+安装后可通过 `gloom3o HELP` 查看 QUOTE、DES、GP、OPX、KELLY、RISK、PORT、FUSION 的命令语法。命令处理通过 handler 分发；QUOTE、DES、GP、PORT、FUSION 需要设置 `GLOOM3O_HELIOS_URL` 指向 Helios 服务。未配置时明确返回错误，不会输出模拟行情或账户数值。OPX 从 Deribit/OKX 公共接口读取实时期权链；KELLY/RISK 必须由调用者提供参数或观测值。
