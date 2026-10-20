@@ -18,10 +18,12 @@ dependencies = [
     "oprim",
     "oskill",
     "omodul",
+    "mcp>=1.27,<3",
 ]
 
 [project.scripts]
 gloom3o = "oservi.cli:main"
+gloom3o-mcp = "oservi.mcp_helios.server:main"
 
 [project.optional-dependencies]
 dev = [

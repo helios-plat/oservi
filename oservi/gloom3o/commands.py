@@ -18,7 +18,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-COMMANDS = ("QUOTE", "DES", "GP", "OPX", "KELLY", "RISK", "PORT", "FUSION", "HELP")
+from oskill.gloom3o_router import GLOOM3O_COMMANDS
+
+COMMANDS = GLOOM3O_COMMANDS
 
 COMMAND_HELP = {
     "QUOTE": "QUOTE <symbol> [exchange=okx] — public quote via configured Helios API",
