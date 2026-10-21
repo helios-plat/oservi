@@ -25,7 +25,7 @@ COMMANDS = GLOOM3O_COMMANDS
 COMMAND_HELP = {
     "QUOTE": "QUOTE <symbol> [exchange=okx] — public quote via configured Helios API",
     "DES": "DES <symbol> [expiry=YYYY-MM-DD] — derivatives summary via Helios API",
-    "GP": "GP <symbol> [period=...] — Gloom profile via Helios API",
+    "GP": "GP <symbol> [exchange=okx|deribit] [bar=1m|5m|15m|1h|4h|1d] [start=ISO8601] [end=ISO8601] [limit=1..300] — public OHLCV history via Helios API",
     "OPX": "OPX <underlying> [exchange=deribit|okx|all] — public options chain indicators",
     "KELLY": "KELLY p=<probability> b=<win/loss> [fraction=<0..1>] [max_fraction=<0..1>]",
     "RISK": "RISK returns=<comma-separated returns> [method=historical|parametric] [equity=...]",

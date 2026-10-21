@@ -1,0 +1,16 @@
+{
+  "name": "gloom3o.oservi",
+  "version": "1.0.0",
+  "description": "Gloom 3O CLI commands and MCP service adapters",
+  "entrypoint": "oservi.gloom3o.commands",
+  "dependencies": [
+    "gloom3o.obase>=1.0.0",
+    "gloom3o.oprim>=1.0.0",
+    "gloom3o.oskill>=1.0.0"
+  ],
+  "capabilities": [
+    "cli",
+    "command-dispatch",
+    "mcp"
+  ]
+}
