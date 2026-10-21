@@ -12,7 +12,7 @@ STAMP = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
 
 def _create(store: ProposalStore):
-    return store.create(symbol="btc-usdt", side="BUY", quantity="0.0250", rationale="Review a manually authored thesis.", created_by="analyst-a", created_at=STAMP)
+    return store.create(symbol="BTC-USDT", side="BUY", quantity="0.0250", rationale="Review a manually authored thesis.", created_by="analyst-a", created_at=STAMP)
 
 
 def test_proposal_is_pending_until_an_independent_review(tmp_path: Path) -> None:

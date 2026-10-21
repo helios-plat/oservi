@@ -214,7 +214,7 @@ class ProposalStore:
         created_by: str,
         created_at: datetime | str | None = None,
     ) -> TradeProposal:
-        symbol = symbol.strip().upper() if isinstance(symbol, str) else ""
+        symbol = symbol.strip() if isinstance(symbol, str) else ""
         created_by = created_by.strip() if isinstance(created_by, str) else ""
         rationale = rationale.strip() if isinstance(rationale, str) else ""
         stamp = _now_iso(created_at)
