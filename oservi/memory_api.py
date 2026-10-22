@@ -7,13 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from obase.memory_bank import MemoryBank, MemoryItem
-
 
 class MemoryApi:
     """ReasoningBank 管理 API (memory 依赖注入)。"""
 
-    def __init__(self, memory: MemoryBank):
+    def __init__(self, memory: Any):
         self.memory = memory
 
     async def add(
@@ -24,6 +22,8 @@ class MemoryApi:
         successful_strategy: dict[str, str],
         context_vector: list[float] | None = None,
     ) -> str:
+        from obase.memory_bank import MemoryItem
+
         item = MemoryItem(
             memory_id=memory_id,
             context_description=context_description,
