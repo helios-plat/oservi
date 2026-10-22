@@ -8,19 +8,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from obase.graph_storage import GraphNode, MarkdownGraphStore
-
 
 class GraftMcpTools:
     """Graft 专属 MCP 工具集 (store 依赖注入, 引擎零业务)。"""
 
-    def __init__(self, store: MarkdownGraphStore):
+    def __init__(self, store: Any):
         self.store = store
 
     def graft_find_code(self, query: str) -> list[dict[str, Any]]:
         """根据语义及依赖查找关联的 Markdown 节点 (关键词打分)。"""
         q_words = set(w.lower() for w in query.split() if len(w) > 2)
-        scored: list[tuple[int, GraphNode]] = []
+        scored: list[tuple[int, Any]] = []
         for node in self.store.load_all():
             haystack = f"{node.summary} {node.crux} {node.node_id}".lower()
             score = sum(1 for w in q_words if w in haystack)

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import inspect
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -101,6 +102,7 @@ class BulkExportWorkerEngine(EngineSkeleton):
         self.config = config
 
         self._running = False
+        self._stop_event = asyncio.Event()
         self._jobs_processed = 0
         self._last_row_count = 0
         self._last_error_count = 0
@@ -108,7 +110,18 @@ class BulkExportWorkerEngine(EngineSkeleton):
         self._last_error: str | None = None
 
     def run(self) -> None:
-        """启动持续运行循环 (阻塞)."""
+        """Start signal-driven engines without blocking the caller."""
+        if self._running:
+            raise RuntimeError(f"BulkExportWorkerEngine {self.name} already running")
+        if self.trigger.get("on_signal"):
+            self._running = True
+            self._stop_event.clear()
+            logger.info(f"BulkExportWorkerEngine '{self.name}' ready for signal dispatch")
+            return
+        self.serve()
+
+    def serve(self) -> None:
+        """Run the legacy event-bus subscription loop synchronously."""
         if self._running:
             raise RuntimeError(f"BulkExportWorkerEngine {self.name} already running")
         self._running = True
@@ -122,6 +135,7 @@ class BulkExportWorkerEngine(EngineSkeleton):
     def stop(self) -> None:
         """优雅停止主循环."""
         self._running = False
+        self._stop_event.set()
 
     async def _run_loop(self) -> None:
         from obase.mq import EventBus
@@ -195,5 +209,85 @@ class BulkExportWorkerEngine(EngineSkeleton):
             },
         }
 
+
+    async def _invoke(self, fn: Callable[..., Any], **kwargs: Any) -> Any:
+            """Sync/async-agnostic callable invocation (keyword args)."""
+            if inspect.iscoroutinefunction(fn):
+                return await fn(**kwargs)
+            raw = fn(**kwargs)
+            if asyncio.iscoroutine(raw):
+                return await raw
+            return raw
+
+    async def _stream_records(self) -> AsyncIterator[Any]:
+            """Lazily stream records from fetcher (anti-OOM).
+
+            Supports sync/async generator functions and sync/async callables
+            returning a sync or async iterable.
+            """
+            fetcher = self.fetcher
+
+            if inspect.isasyncgenfunction(fetcher):
+                async for record in fetcher():
+                    yield record
+                return
+
+            if inspect.isgeneratorfunction(fetcher):
+                for record in fetcher():
+                    yield record
+                return
+
+            if inspect.iscoroutinefunction(fetcher):
+                produced = await fetcher()
+            else:
+                produced = fetcher()
+                if asyncio.iscoroutine(produced):
+                    produced = await produced
+
+            if hasattr(produced, "__aiter__"):
+                async for record in produced:
+                    yield record
+            else:
+                for record in produced:
+                    yield record
+
+    async def export(
+            self,
+            *,
+            on_step: Callable[[dict[str, Any]], None] | None = None,
+        ) -> dict[str, Any]:
+            """Stream records, format via formatter, upload via uploader.
+
+            Args:
+                on_step: Optional callback called per record with
+                         {"index": int, "exported": bool}.
+
+            Returns:
+                {"status": "completed", "exported": int, "location": Any}
+            """
+            exported = 0
+            location: Any = None
+
+            index = 0
+            async for record in self._stream_records():
+                formatted = await self._invoke(self.formatter, record=record)
+                upload_result = await self._invoke(self.uploader, data=formatted)
+                if upload_result is not None:
+                    location = upload_result
+                exported += 1
+
+                if on_step:
+                    try:
+                        on_step({"index": index, "exported": True})
+                    except Exception as cb_err:
+                        logger.warning(f"on_step callback failed at record {index}: {cb_err}")
+
+                index += 1
+
+            return {
+                "status": "completed",
+                "exported": exported,
+                "location": location,
+            }
 
 register_skeleton("bulk_export_worker", BulkExportWorkerEngine)

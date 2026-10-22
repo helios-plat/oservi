@@ -125,6 +125,14 @@ class SagaComposerEngine(EngineSkeleton):
              "compensated": [...]} if a step failed (compensations already run).
         """
         input_data = input_data or {}
+        # The Gloom3O compensation contract identifies compensation_no/reason;
+        # keep it alongside the established step_no/step_result API.
+        import inspect as _inspect
+        gloom_compensation_contract = any(
+            compensation is not None
+            and {"compensation_no", "reason"} <= set(_inspect.signature(compensation).parameters)
+            for compensation in self.compensation_list
+        )
         results: list[Any] = []
         failed_step: int | None = None
 
@@ -148,9 +156,44 @@ class SagaComposerEngine(EngineSkeleton):
                 break
 
         if failed_step is None:
-            return {"status": "completed", "results": results}
+            return {"status": "completed", "results": results, "compensated": [], "compensations_run": []}
 
         compensated: list[Any] = []
+        if gloom_compensation_contract:
+            # Gloom3O's direct contract compensates each registered step in reverse
+            # order and reports individual compensation records.
+            ordered = list(enumerate(self.compensation_list))[::-1]
+            for comp_no, compensation in enumerate([item for _, item in ordered]):
+                if compensation is None:
+                    continue
+                original_index = ordered[comp_no][0]
+                try:
+                    comp_result = await self._invoke(
+                        compensation,
+                        input_data=input_data,
+                        compensation_no=comp_no,
+                        reason=results[failed_step],
+                    )
+                    record = dict(comp_result) if isinstance(comp_result, dict) else {"result": comp_result}
+                except Exception as e:
+                    self._last_error = f"compensation {comp_no} {getattr(compensation, '__name__', compensation)}: {e}"
+                    logger.warning(f"SagaComposerEngine '{self.name}' compensation {comp_no} raised: {e}")
+                    record = {"error": str(e)}
+                compensated.append(record)
+                if on_step:
+                    try:
+                        on_step({"phase": "compensate", "step_no": original_index, "result": record, "ok": "error" not in record})
+                    except Exception as cb_err:
+                        logger.warning(f"on_step callback failed at compensation {comp_no}: {cb_err}")
+            status = "compensated" if compensated else "failed"
+            return {
+                "status": status,
+                "failed_step": failed_step,
+                "results": results,
+                "compensated": compensated,
+                "compensations_run": compensated,
+            }
+
         for i in range(failed_step - 1, -1, -1):
             compensation = self._compensation_for(i)
             if compensation is None:
@@ -178,6 +221,7 @@ class SagaComposerEngine(EngineSkeleton):
             "failed_step": failed_step,
             "results": results,
             "compensated": compensated,
+            "compensations_run": compensated,
         }
 
     def stop(self) -> None:
@@ -195,5 +239,14 @@ class SagaComposerEngine(EngineSkeleton):
             },
         }
 
+
+    async def _invoke(self, fn: Callable[..., Any], **kwargs: Any) -> Any:
+            """Sync/async-agnostic callable invocation (keyword args)."""
+            if inspect.iscoroutinefunction(fn):
+                return await fn(**kwargs)
+            raw = fn(**kwargs)
+            if asyncio.iscoroutine(raw):
+                return await raw
+            return raw
 
 register_skeleton("saga_composer", SagaComposerEngine)
