@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import inspect
 from typing import Any, Callable, ClassVar
 
 from oservi.engines._base import EngineSkeleton, Injection, register_skeleton
@@ -73,11 +74,23 @@ class EventWebhookDispatcherEngine(EngineSkeleton):
         self.config = config
 
         self._running = False
+        self._stop_event = asyncio.Event()
         self._dispatch_count = 0
         self._last_error: str | None = None
 
     def run(self) -> None:
-        """启动持续运行循环 (阻塞)."""
+        """Start signal-driven engines without blocking the caller."""
+        if self._running:
+            raise RuntimeError(f"EventWebhookDispatcherEngine {self.name} already running")
+        if self.trigger.get("on_signal"):
+            self._running = True
+            self._stop_event.clear()
+            logger.info(f"EventWebhookDispatcherEngine '{self.name}' ready for signal dispatch")
+            return
+        self.serve()
+
+    def serve(self) -> None:
+        """Run the legacy event-bus subscription loop synchronously."""
         if self._running:
             raise RuntimeError(f"EventWebhookDispatcherEngine {self.name} already running")
         self._running = True
@@ -91,6 +104,7 @@ class EventWebhookDispatcherEngine(EngineSkeleton):
     def stop(self) -> None:
         """优雅停止主循环."""
         self._running = False
+        self._stop_event.set()
 
     async def _run_loop(self) -> None:
         from obase.mq import EventBus
@@ -145,5 +159,72 @@ class EventWebhookDispatcherEngine(EngineSkeleton):
             },
         }
 
+
+    async def _invoke(self, fn: Callable[..., Any], **kwargs: Any) -> Any:
+            """Sync/async-agnostic callable invocation (keyword args)."""
+            if inspect.iscoroutinefunction(fn):
+                return await fn(**kwargs)
+            raw = fn(**kwargs)
+            if asyncio.iscoroutine(raw):
+                return await raw
+            return raw
+
+    async def dispatch(
+            self,
+            event: str,
+            payload: dict[str, Any],
+            *,
+            on_step: Callable[[dict[str, Any]], None] | None = None,
+        ) -> dict[str, Any]:
+            """Fan out an event to ALL subscribers CONCURRENTLY.
+
+            Args:
+                event: Event name / topic string.
+                payload: Event payload dict passed to each subscriber.
+                on_step: Optional callback called per subscriber with
+                         {"subscriber": str, "ok": bool}.
+
+            Returns:
+                {"status": "completed", "event": event,
+                 "results": [...], "errors": [...]}
+            """
+            self._dispatch_count += 1
+
+            async def _call(sub: Callable[..., Any]) -> Any:
+                return await self._invoke(sub, event=event, payload=payload)
+
+            # 并发拉起所有 subscribers; return_exceptions 捕获单个异常
+            raw_results = await asyncio.gather(
+                *(_call(sub) for sub in self.subscriber_list),
+                return_exceptions=True,
+            )
+
+            results: list[Any] = []
+            errors: list[dict[str, Any]] = []
+            for sub, raw in zip(self.subscriber_list, raw_results):
+                sub_name = getattr(sub, "__name__", repr(sub))
+                if isinstance(raw, BaseException):
+                    self._last_error = f"subscriber {sub_name}: {type(raw).__name__}: {raw}"
+                    logger.warning(
+                        f"EventWebhookDispatcherEngine '{self.name}' subscriber "
+                        f"{sub_name} failed: {raw}"
+                    )
+                    errors.append({"subscriber": sub_name, "error": str(raw)})
+                    ok = False
+                else:
+                    results.append(raw)
+                    ok = True
+                if on_step:
+                    try:
+                        on_step({"subscriber": sub_name, "ok": ok})
+                    except Exception as cb_err:
+                        logger.warning(f"on_step callback failed for {sub_name}: {cb_err}")
+
+            return {
+                "status": "completed",
+                "event": event,
+                "results": results,
+                "errors": errors,
+            }
 
 register_skeleton("event_webhook_dispatcher", EventWebhookDispatcherEngine)

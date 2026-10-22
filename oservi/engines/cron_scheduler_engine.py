@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import inspect
 import time
 from datetime import UTC, datetime
 from typing import Any, Callable, ClassVar
@@ -78,7 +79,9 @@ class CronSchedulerEngine(EngineSkeleton):
         self.config = config
 
         self._running = False
+        self._stop_event = asyncio.Event()
         self._fire_count = 0
+        self._tick_count = 0
         self._last_error: str | None = None
         self._last_fire_at: str | None = None
 
@@ -97,8 +100,18 @@ class CronSchedulerEngine(EngineSkeleton):
     def stop(self) -> None:
         """优雅停止主循环."""
         self._running = False
+        self._stop_event.set()
 
     async def _run_loop(self) -> None:
+        if "interval_seconds" in self.config or "on_interval" in self.trigger or isinstance(self.trigger.get("on_cron"), (int, float)):
+            interval = max(0.001, self._resolve_interval())
+            while self._running:
+                await asyncio.sleep(interval)
+                if not self._running:
+                    break
+                self._last_fire_at = datetime.now(UTC).isoformat()
+                await self.run_once()
+            return
         while self._running:
             now = datetime.now(UTC)
             itr = croniter(self.cron_expr, now)
@@ -137,10 +150,45 @@ class CronSchedulerEngine(EngineSkeleton):
                 "cron_expr": self.cron_expr,
                 "tasks_count": len(self.task_list),
                 "fire_count": self._fire_count,
+                "tick_count": self._tick_count,
                 "last_fire_at": self._last_fire_at,
                 "last_error": self._last_error,
             },
         }
 
+
+    async def _invoke(self, fn: Callable[..., Any], **kwargs: Any) -> Any:
+            """Sync/async-agnostic callable invocation (keyword args)."""
+            if inspect.iscoroutinefunction(fn):
+                return await fn(**kwargs)
+            raw = fn(**kwargs)
+            if asyncio.iscoroutine(raw):
+                return await raw
+            return raw
+
+    def _resolve_interval(self) -> float:
+            """Resolve the tick interval in seconds from config/trigger."""
+            if "interval_seconds" in self.config:
+                return float(self.config["interval_seconds"])
+            cron = self.trigger.get("on_cron")
+            if isinstance(cron, (int, float)):
+                return float(cron)
+            return float(self.trigger.get("on_interval", 60))
+
+    async def run_once(self) -> list[Any]:
+            """执行单个 tick: 顺序跑所有 tasks 一次, 返回结果列表 (供测试)."""
+            results: list[Any] = []
+            for i, task in enumerate(self.task_list):
+                try:
+                    result = await self._invoke(task, tick_no=self._tick_count, task_no=i)
+                except Exception as e:
+                    self._last_error = (
+                        f"task {i} {getattr(task, '__name__', task)}: {type(e).__name__}: {e}"
+                    )
+                    logger.warning(f"CronSchedulerEngine '{self.name}' task {i} failed: {e}")
+                    result = {"error": str(e), "task_no": i}
+                results.append(result)
+            self._tick_count += 1
+            return results
 
 register_skeleton("cron_scheduler_engine", CronSchedulerEngine)

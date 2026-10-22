@@ -93,7 +93,12 @@ class StateMachineEngine(EngineSkeleton):
     ) -> None:
         self.name = name
         transition_list = transitions if isinstance(transitions, list) else [transitions]
+        self.transition_list = transition_list
         self._transitions_by_name = {fn.__name__: fn for fn in transition_list}
+        self._transitions = {
+            (getattr(fn, "name", None) or getattr(fn, "__name__", "")): fn
+            for fn in transition_list
+        }
         if validators is None:
             self.validator_list: list[Callable[..., Any]] = []
         elif isinstance(validators, list):
@@ -106,12 +111,15 @@ class StateMachineEngine(EngineSkeleton):
 
         self._last_error: str | None = None
         self._transition_count = 0
+        self._stop_event = asyncio.Event()
 
     async def run(  # type: ignore[override]
         self,
         *,
-        from_status: str,
-        to_status: str,
+        from_status: str | None = None,
+        to_status: str | None = None,
+        state: Any = None,
+        to_state: str | None = None,
         input_data: dict[str, Any] | None = None,
         on_step: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
@@ -131,6 +139,12 @@ class StateMachineEngine(EngineSkeleton):
             fails.
         """
         input_data = input_data or {}
+        if to_state is not None or (from_status is None and to_status is None):
+            return await self._run_gloom3o(
+                state=state, to_state=to_state, input_data=input_data, on_step=on_step
+            )
+        if from_status is None or to_status is None:
+            return self._reject("", "missing source or target state", on_step)
         key = f"{from_status}->{to_status}"
 
         if key not in self.transition_map:
@@ -185,7 +199,8 @@ class StateMachineEngine(EngineSkeleton):
         return outcome
 
     def stop(self) -> None:
-        """No-op for on_demand engines."""
+        """Signal the on-demand transition engine to stop."""
+        self._stop_event.set()
 
     def health(self) -> dict[str, Any]:
         return {
@@ -196,9 +211,93 @@ class StateMachineEngine(EngineSkeleton):
                 "validators_count": len(self.validator_list),
                 "known_transitions": sorted(self.transition_map.keys()),
                 "transition_count": self._transition_count,
+                "transitions_count": len(self._transitions),
+                "known_states": sorted(self._transitions),
+                "running": self._stop_event.is_set() is False,
                 "last_error": self._last_error,
             },
         }
 
+
+    async def _invoke(self, fn: Callable[..., Any], **kwargs: Any) -> Any:
+            """Sync/async-agnostic callable invocation (keyword args)."""
+            if inspect.iscoroutinefunction(fn):
+                return await fn(**kwargs)
+            raw = fn(**kwargs)
+            if asyncio.iscoroutine(raw):
+                return await raw
+            return raw
+
+    async def _run_gloom3o(
+        self,
+        *,
+        state: Any,
+        to_state: str | None,
+        input_data: dict[str, Any],
+        on_step: Callable[[dict[str, Any]], None] | None,
+    ) -> dict[str, Any]:
+        if to_state is None:
+            result = self._blocked(state, to_state, "no_target_state")
+            self._notify(on_step, result)
+            return result
+        transition = self._transitions.get(to_state)
+        if transition is None:
+            result = self._blocked(state, to_state, "unknown_transition")
+            self._notify(on_step, result)
+            return result
+        for validator in self.validator_list:
+            try:
+                allowed = await self._invoke(
+                    validator, state=state, to_state=to_state, input_data=input_data
+                )
+            except Exception as exc:
+                self._last_error = f"validator {getattr(validator, '__name__', validator)}: {exc}"
+                logger.warning(f"StateMachineEngine '{self.name}' validator failed: {exc}")
+                allowed = False
+            if not allowed:
+                result = self._blocked(state, to_state, "guard_rejected")
+                self._notify(on_step, result)
+                return result
+        try:
+            value = await self._invoke(
+                transition, state=state, to_state=to_state, input_data=input_data
+            )
+        except Exception as exc:
+            self._last_error = f"transition {to_state}: {exc}"
+            logger.warning(f"StateMachineEngine '{self.name}' transition failed: {exc}")
+            result = self._blocked(state, to_state, "transition_error")
+            result["error"] = str(exc)
+            self._notify(on_step, result)
+            return result
+        self._transition_count += 1
+        result = {
+            "status": "completed",
+            "from_state": state,
+            "to_state": to_state,
+            "reason": None,
+            "result": value,
+        }
+        self._notify(on_step, result)
+        return result
+
+    def _blocked(self, state: Any, to_state: Any, reason: str) -> dict[str, Any]:
+            return {
+                "status": "blocked",
+                "from_state": state,
+                "to_state": to_state,
+                "reason": reason,
+                "result": None,
+            }
+
+    def _notify(
+            self,
+            on_step: Callable[[dict[str, Any]], None] | None,
+            result: dict[str, Any],
+        ) -> None:
+            if on_step:
+                try:
+                    on_step(result)
+                except Exception as cb_err:
+                    logger.warning(f"on_step callback failed: {cb_err}")
 
 register_skeleton("state_machine_engine", StateMachineEngine)

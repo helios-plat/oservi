@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import inspect
 from collections.abc import AsyncIterator
 from typing import Any, Callable, ClassVar
 
@@ -92,13 +93,25 @@ class BulkImportWorkerEngine(EngineSkeleton):
         self.config = config
 
         self._running = False
+        self._stop_event = asyncio.Event()
         self._jobs_processed = 0
         self._last_row_count = 0
         self._last_error_count = 0
         self._last_error: str | None = None
 
     def run(self) -> None:
-        """启动持续运行循环 (阻塞)."""
+        """Start signal-driven engines without blocking the caller."""
+        if self._running:
+            raise RuntimeError(f"BulkImportWorkerEngine {self.name} already running")
+        if self.trigger.get("on_signal"):
+            self._running = True
+            self._stop_event.clear()
+            logger.info(f"BulkImportWorkerEngine '{self.name}' ready for signal dispatch")
+            return
+        self.serve()
+
+    def serve(self) -> None:
+        """Run the legacy event-bus subscription loop synchronously."""
         if self._running:
             raise RuntimeError(f"BulkImportWorkerEngine {self.name} already running")
         self._running = True
@@ -112,6 +125,7 @@ class BulkImportWorkerEngine(EngineSkeleton):
     def stop(self) -> None:
         """优雅停止主循环."""
         self._running = False
+        self._stop_event.set()
 
     async def _run_loop(self) -> None:
         from obase.mq import EventBus
@@ -170,5 +184,100 @@ class BulkImportWorkerEngine(EngineSkeleton):
             },
         }
 
+
+    async def _invoke(self, fn: Callable[..., Any], **kwargs: Any) -> Any:
+            """Sync/async-agnostic callable invocation (keyword args)."""
+            if inspect.iscoroutinefunction(fn):
+                return await fn(**kwargs)
+            raw = fn(**kwargs)
+            if asyncio.iscoroutine(raw):
+                return await raw
+            return raw
+
+    async def _stream_records(self) -> AsyncIterator[Any]:
+            """Lazily stream records from fetcher (anti-OOM).
+
+            Supports sync/async generator functions and sync/async callables
+            returning a sync or async iterable.
+            """
+            fetcher = self.fetcher
+
+            # async generator function → async for directly
+            if inspect.isasyncgenfunction(fetcher):
+                async for record in fetcher():
+                    yield record
+                return
+
+            # sync generator function → calling produces a lazy generator
+            if inspect.isgeneratorfunction(fetcher):
+                for record in fetcher():
+                    yield record
+                return
+
+            # plain sync/async callable returning an iterable
+            if inspect.iscoroutinefunction(fetcher):
+                produced = await fetcher()
+            else:
+                produced = fetcher()
+                if asyncio.iscoroutine(produced):
+                    produced = await produced
+
+            if hasattr(produced, "__aiter__"):
+                async for record in produced:
+                    yield record
+            else:
+                for record in produced:
+                    yield record
+
+    async def process(
+            self,
+            *,
+            on_step: Callable[[dict[str, Any]], None] | None = None,
+        ) -> dict[str, Any]:
+            """Stream records from fetcher and apply processor per record.
+
+            Args:
+                on_step: Optional callback called per record with
+                         {"index": int, "ok": bool}.
+
+            Returns:
+                {"status": "completed", "processed": int, "failed": int,
+                 "errors": [...]}
+            """
+            processed = 0
+            failed = 0
+            errors: list[dict[str, Any]] = []
+
+            index = 0
+            async for record in self._stream_records():
+                try:
+                    await self._invoke(self.processor, record=record)
+                    processed += 1
+                    ok = True
+                except Exception as e:
+                    failed += 1
+                    ok = False
+                    self._last_error = (
+                        f"record {index}: {type(e).__name__}: {e}"
+                    )
+                    logger.warning(
+                        f"BulkImportWorkerEngine '{self.name}' record {index} failed: {e}"
+                    )
+                    errors.append({"index": index, "error": str(e)})
+
+                if on_step:
+                    try:
+                        on_step({"index": index, "ok": ok})
+                    except Exception as cb_err:
+                        logger.warning(f"on_step callback failed at record {index}: {cb_err}")
+
+                index += 1
+
+            return {
+                "status": "completed",
+                "processed": processed,
+                "failed": failed,
+                "errors": errors,
+            }
 
 register_skeleton("bulk_import_worker", BulkImportWorkerEngine)
